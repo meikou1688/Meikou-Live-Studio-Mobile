@@ -73,3 +73,7 @@ RTMP 與 RTMPS 的分欄、完整網址、查詢參數保留與錯誤格式共 1
 [編譯與完整測試紀錄](https://github.com/meikou1688/Meikou-Live-Studio-Mobile/actions/runs/45867400228)
 
 Android 15 x86_64 模擬器未公開 HEVC 編碼器與相機尺寸組合。自動驗收會將該場記為 `not_supported`，不會把未產生的 H.265 串流誤列為通過；H.265 SRT 仍須在具備硬體編碼器的實機執行真正編碼與獨立接收解碼。
+
+2026-11-27，GitHub Actions 第 45875607936 次執行完整通過。修正 44.1 kHz 到 48 kHz 的串流重採樣後，RTMP 接收端量得播放清單音調 997.25 Hz，SRT 接收端量得 996.54 Hz（來源 997 Hz）。六路 RTMP 的 H.264／AAC 接收長度差均為 64 毫秒，SRT 為 134 毫秒；兩者皆由 FFmpeg 實際解碼，並核對濾鏡、QR Code、圖片與影片輪播。模擬器 HEVC 場次明確記為 `not_supported`，未產生或宣稱 H.265 通過。
+
+[重採樣、RTMP／SRT 接收及素材驗收紀錄](https://github.com/meikou1688/Meikou-Live-Studio-Mobile/actions/runs/45875607936)
