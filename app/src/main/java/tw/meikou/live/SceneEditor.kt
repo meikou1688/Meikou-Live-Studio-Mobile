@@ -7,7 +7,7 @@ import android.view.*
 import android.widget.*
 import kotlin.math.*
 
-class SceneEditor(private val host:Activity,private val scenes:Scenes,private val preview:LayerCanvas,private val canPick:()->Boolean){
+class SceneEditor(private val host:Activity,private val scenes:Scenes,private val preview:LayerCanvas,private val cleanPreview:(Boolean)->Unit,private val canPick:()->Boolean){
     companion object{const val PICK=701;const val PICK_VIDEO=702}
     private var selected:String?=null
     private var previousX=0f
@@ -16,6 +16,9 @@ class SceneEditor(private val host:Activity,private val scenes:Scenes,private va
     private var previousAngle=0f
     private var count=0
     private var handleScale=false
+    private var blank=false
+    private var startX=0f
+    private var startY=0f
     init{
         preview.selection={selected}
         preview.setOnTouchListener{_,event->gesture(event)}
@@ -82,7 +85,20 @@ class SceneEditor(private val host:Activity,private val scenes:Scenes,private va
             val handle=preview.onHandle(selected,e.x,e.y)
             handleScale=handle
             if(!handle)selected=preview.hit(e.x,e.y)
+            blank=selected==null
+            startX=e.x;startY=e.y
             preview.invalidate()
+        }
+        if(blank){
+            if(e.actionMasked==MotionEvent.ACTION_POINTER_DOWN || e.actionMasked==MotionEvent.ACTION_CANCEL)blank=false
+            if(e.actionMasked==MotionEvent.ACTION_UP){
+                blank=false
+                val dx=e.x-startX;val dy=e.y-startY
+                if(abs(dx)>64*host.resources.displayMetrics.density && abs(dx)>1.5f*abs(dy)){
+                    if(dx<0){cleanPreview(false);edit()} else cleanPreview(true)
+                }else cleanPreview(false)
+            }
+            return true
         }
         val layer=scenes.active.layers.firstOrNull{it.id==selected && !it.locked}?:return false
         if(e.actionMasked==MotionEvent.ACTION_UP || e.actionMasked==MotionEvent.ACTION_CANCEL){scenes.save();count=0;return true}

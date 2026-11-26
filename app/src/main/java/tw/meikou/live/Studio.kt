@@ -276,7 +276,11 @@ class Studio:Activity(){
             override fun onStopTrackingTouch(s:SeekBar){}
         })
         section("場景與素材")
-        sceneEditor=SceneEditor(this,scenes,touch){capture==null}
+        val transport=LinearLayout(this).apply{gravity=Gravity.CENTER}
+        sceneEditor=SceneEditor(this,scenes,touch,{hide->
+            val state=if(hide && capture==null && !waiting)View.GONE else View.VISIBLE
+            bar.visibility=state;transport.visibility=state
+        }){capture==null}
         button("選擇或新增場景"){settingsOpen(false);sceneEditor.chooseScene()}
         button("編輯素材圖層"){settingsOpen(false);sceneEditor.edit()}
         section("串流輸出")
@@ -302,7 +306,6 @@ class Studio:Activity(){
         val photo=button(ui("photo")){}
         photo.setOnClickListener{savePreviewPhoto(photo)}
         button(ui("diagnostics")){hardware()}
-        val transport=LinearLayout(this).apply{gravity=Gravity.CENTER}
         page.addView(transport,-1,dp(46))
         fun quick(title:String,run:()->Unit){
             transport.addView(Button(this).apply{text=title;textSize=13f;minWidth=0;setPadding(0,0,0,0);setOnClickListener{run()}},LinearLayout.LayoutParams(dp(72),dp(44)))
