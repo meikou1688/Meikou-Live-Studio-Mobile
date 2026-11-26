@@ -1,5 +1,9 @@
 # 開發進度｜2026-11-26
 
+## 0.1.1 介面更新
+
+品牌來源為 meikou1688/meikou-live-studio 的 meikou/resources/logo 與 src/main.cpp；行動版沿用單一即時取景。
+
 | 項目 | 狀態 |
 |---|---|
 | Android 工具鏈與獨立 Kotlin 專案 | 已找到本機工具，已離線編譯、封裝、簽署與驗章 |

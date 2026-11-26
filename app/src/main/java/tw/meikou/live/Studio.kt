@@ -15,6 +15,27 @@ import java.io.File
 import java.net.URI
 
 class Studio:Activity(){
+    private fun dp(value:Int)=(value*resources.displayMetrics.density+0.5f).toInt()
+    private fun color(hex:String)=Color.parseColor(hex)
+    private fun box(fill:String,edge:String=fill,radius:Int=6)=android.graphics.drawable.GradientDrawable().apply{
+        setColor(color(fill));setStroke(dp(1),color(edge));cornerRadius=dp(radius).toFloat()
+    }
+    private lateinit var monitorArea:FrameLayout
+    private lateinit var monitorName:TextView
+    private fun monitorState(streaming:Boolean){
+        val shade=if(streaming)"#ff4d5e" else "#2ecc71"
+        monitorArea.background=box("#000000",shade,4)
+        monitorArea.foreground=android.graphics.drawable.GradientDrawable().apply{setColor(Color.TRANSPARENT);setStroke(dp(2),color(shade))}
+        monitorName.text=if(streaming)"播出 PGM" else "預覽 PVW"
+        monitorName.setTextColor(color(shade))
+    }
+    private fun section(title:String){
+        label(title).apply{
+            setTextColor(color("#00e5c0"));textSize=15f
+            setTypeface(typeface,android.graphics.Typeface.BOLD)
+            setPadding(0,dp(14),0,dp(3))
+        }
+    }
     private lateinit var preview:SurfaceView
     private lateinit var panel:LinearLayout
     private lateinit var status:TextView
@@ -69,9 +90,20 @@ class Studio:Activity(){
     }
     override fun onCreate(b:Bundle?){super.onCreate(b)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        val root=LinearLayout(this).apply{setBackgroundColor(Color.rgb(12,22,25))}
+        val page=LinearLayout(this).apply{orientation=1;setBackgroundColor(color("#12131a"))}
+        val bar=LinearLayout(this).apply{gravity=Gravity.CENTER_VERTICAL;setPadding(dp(12),0,dp(12),0)}
+        page.addView(bar,-1,dp(46))
+        val logo=ImageView(this).apply{
+            setImageResource(resources.getIdentifier("wordmark","drawable",packageName))
+            scaleType=ImageView.ScaleType.FIT_CENTER;contentDescription="Meikou Live Studio"
+        }
+        bar.addView(logo,dp(158),dp(34))
+        monitorName=TextView(this).apply{gravity=Gravity.CENTER_VERTICAL or Gravity.END;textSize=14f}
+        bar.addView(monitorName,LinearLayout.LayoutParams(0,-1,1f))
+        val root=LinearLayout(this)
+        page.addView(root,LinearLayout.LayoutParams(-1,0,1f))
         preview=SurfaceView(this)
-        val frame=FrameLayout(this)
+        val frame=FrameLayout(this);monitorArea=frame;monitorState(false)
         frame.addView(preview,FrameLayout.LayoutParams(-1,-1,Gravity.CENTER))
         frame.addOnLayoutChangeListener{_,left,top,right,bottom,_,_,_,_->
             val width=minOf(right-left,(bottom-top)*16/9)
@@ -80,18 +112,22 @@ class Studio:Activity(){
                 preview.layoutParams=FrameLayout.LayoutParams(width,height,Gravity.CENTER)
         }
         root.addView(frame,LinearLayout.LayoutParams(0,-1,1f))
-        root.setOnApplyWindowInsetsListener{v,insets->
+        page.setOnApplyWindowInsetsListener{v,insets->
             val padding=insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
             v.setPadding(padding.left,padding.top,padding.right,padding.bottom);insets
         }
-        val scroll=ScrollView(this);panel=LinearLayout(this).apply{orientation=1;setPadding(16,12,16,16)}
-        scroll.addView(panel);root.addView(scroll,LinearLayout.LayoutParams((resources.displayMetrics.density*265).toInt(),-1))
-        setContentView(root)
-        val mark=ImageView(this);mark.setImageResource(resources.getIdentifier("wordmark","drawable",packageName));mark.adjustViewBounds=true;panel.addView(mark,-1,(resources.displayMetrics.density*64).toInt())
-        status=label(ui("idle"));status.setTextColor(Color.rgb(99,226,202))
+        val controls=LinearLayout(this).apply{orientation=1;setBackgroundColor(color("#1c1e26"));setPadding(dp(10),0,dp(10),dp(4))}
+        val controlWidth=(resources.configuration.screenWidthDp*0.33).toInt().coerceIn(218,300)
+        root.addView(controls,LinearLayout.LayoutParams(dp(controlWidth),-1))
+        val scroll=ScrollView(this)
+        panel=LinearLayout(this).apply{orientation=1}
+        scroll.addView(panel);controls.addView(scroll,LinearLayout.LayoutParams(-1,0,1f))
+        setContentView(page)
+        status=label(ui("idle"));status.setTextColor(color("#e6e8ec"))
         netText=label("網路 · 檢查中");reading=label("尚未擷取")
+        section("鏡頭控制")
         shortcuts=LinearLayout(this);panel.addView(shortcuts)
-        lenses=spinner(ui("lens"));sizes=spinner(ui("resolution"));rates=spinner(ui("fps"));bits=spinner(ui("bitrate"))
+        lenses=spinner(ui("lens"));section("影音設定");sizes=spinner(ui("resolution"));rates=spinner(ui("fps"));bits=spinner(ui("bitrate"))
         options(bits,listOf(2,4,6,8,12));bits.setSelection(1)
         inputs=spinner(ui("input_device"))
         val sound=getSystemService(AUDIO_SERVICE) as AudioManager
@@ -108,11 +144,23 @@ class Studio:Activity(){
             override fun onStartTrackingTouch(s:SeekBar){}
             override fun onStopTrackingTouch(s:SeekBar){}
         })
+        section("串流輸出")
         address=EditText(this).apply{hint="RTMP／RTMPS 完整推流網址";setSingleLine();inputType=android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD;isSaveEnabled=false}
+        address.background=box("#20222b","#3a3e4c",4)
+        address.setPadding(dp(10),dp(6),dp(10),dp(6));address.textSize=14f
         panel.addView(address)
         live=button(ui("go_live")){begin(true)}
         record=button(ui("record")){begin(false)}
         button(ui("diagnostics")){hardware()}
+        val transport=LinearLayout(this).apply{gravity=Gravity.CENTER;setPadding(0,dp(5),0,0)}
+        controls.addView(transport,-1,-2)
+        for(action in listOf(live,record)){
+            panel.removeView(action)
+            action.background=box(if(action==live)"#d7263d" else "#3a3e4c")
+            val params=LinearLayout.LayoutParams(0,dp(48),1f)
+            if(action==record)params.marginStart=dp(5)
+            transport.addView(action,params)
+        }
         lenses.onItemSelectedListener=object:AdapterView.OnItemSelectedListener{
             override fun onNothingSelected(v:AdapterView<*>?){}
             override fun onItemSelected(v:AdapterView<*>?,view:View?,i:Int,id:Long){
@@ -145,9 +193,9 @@ class Studio:Activity(){
         config.setLocale(java.util.Locale.TAIWAN)
         super.attachBaseContext(base.createConfigurationContext(config))
     }
-    private fun label(s:String)=TextView(this).also{it.text=s;panel.addView(it)}
-    private fun spinner(s:String)=Spinner(this).also{label(s);panel.addView(it)}
-    private fun button(s:String,f:()->Unit)=Button(this).also{it.text=s;panel.addView(it);it.setOnClickListener{f()}}
+    private fun label(s:String)=TextView(this).also{it.text=s;it.setTextColor(color("#b8bdc9"));it.textSize=13f;it.setPadding(0,dp(4),0,dp(2));panel.addView(it)}
+    private fun spinner(s:String)=Spinner(this).also{label(s);it.background=box("#20222b","#3a3e4c",4);it.setPadding(dp(8),0,dp(8),0);it.minimumHeight=dp(44);panel.addView(it)}
+    private fun button(s:String,f:()->Unit)=Button(this).also{it.text=s;it.textSize=14f;it.setTextColor(android.content.res.ColorStateList(arrayOf(intArrayOf(-android.R.attr.state_enabled),intArrayOf()),intArrayOf(color("#aeb3c0"),Color.WHITE)));it.background=box("#2a2d38","#3a3e4c");panel.addView(it);it.setOnClickListener{f()}}
     private fun <T> options(view:Spinner,items:List<T>){view.adapter=ArrayAdapter(this,android.R.layout.simple_spinner_dropdown_item,items)}
     private fun granted()=listOf(Manifest.permission.CAMERA,Manifest.permission.RECORD_AUDIO).all{checkSelfPermission(it)==PackageManager.PERMISSION_GRANTED}
     override fun onRequestPermissionsResult(r:Int,p:Array<String>,g:IntArray){super.onRequestPermissionsResult(r,p,g);if(granted())loadLenses()else status.text="請在系統設定允許使用相機與麥克風。"}
@@ -160,7 +208,7 @@ class Studio:Activity(){
         for(name in listOf(ui("wide"),ui("normal"),ui("tele"))){
             val group=groups[name]?:continue
             val candidate=group.sortedByDescending{it.value.physical!=null}.first()
-            shortcuts.addView(Button(this).apply{text=name;setPadding(0,0,0,0);minWidth=0
+            shortcuts.addView(Button(this).apply{text=name;background=box("#2a2d38","#3a3e4c");setTextColor(color("#e6e8ec"));setPadding(0,0,0,0);minWidth=0
                 setOnClickListener{lenses.setSelection(candidate.index)}},LinearLayout.LayoutParams(0,-2,1f))
         }
         if(list.isEmpty())status.text="無可用鏡頭"}.onFailure{status.text="無法讀取鏡頭參數"}}
@@ -205,10 +253,10 @@ class Studio:Activity(){
         live.isEnabled=stream;record.isEnabled=!stream
         if(stream)live.text=ui("stop_live") else record.text=ui("stop_record")
         capture=Capture(this,preview.holder.surface,p,l,devices.getOrNull(inputs.selectedItemPosition-1),zoomRatio(l,zoom.progress),{s->runOnUiThread{reading.text=s}},uri,file,
-            {mode->runOnUiThread{if(!ending)status.text=if(mode==1)"直播中 · 已送出影音" else "錄影中"}},
+            {mode->runOnUiThread{if(!ending){monitorState(mode==1);status.text=if(mode==1)"直播中 · 已送出影音" else "錄影中"}}},
             {ok,networkError->
                 val saved=if(ok && file!=null)saveMovie(file) else null
-                runOnUiThread{capture=null;profile=null
+                runOnUiThread{capture=null;profile=null;monitorState(false)
                 listOf(inputs,sizes,rates,bits,codecs,address,live,record).forEach{it.isEnabled=true}
                 live.text=ui("go_live");record.text=ui("record");reading.text="已停止擷取"
                 status.text=if(!ok)"擷取或傳輸未完成，請檢查鏡頭、編碼規格與連線。" else saved?.let{"已儲存 "+it} ?: "直播已結束"

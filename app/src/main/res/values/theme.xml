@@ -1,0 +1,6 @@
+<resources><style name="StudioTheme" parent="@android:style/Theme.Material.NoActionBar">
+<item name="android:colorAccent">#00e5c0</item><item name="android:colorBackground">#12131a</item>
+<item name="android:windowBackground">#12131a</item><item name="android:colorBackgroundFloating">#20222b</item>
+<item name="android:statusBarColor">#12131a</item><item name="android:navigationBarColor">#12131a</item>
+<item name="android:textColorPrimary">#e6e8ec</item><item name="android:textColorSecondary">#b8bdc9</item>
+</style></resources>
