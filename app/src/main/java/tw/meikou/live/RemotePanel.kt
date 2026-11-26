@@ -52,13 +52,15 @@ internal class PeerServer private constructor(private val socket:SSLServerSocket
                         val reply=JSONObject().put("protocolVersion",1).put("requestId",id).put("result",result)
                         DataOutputStream(client.outputStream).apply{writeUTF(reply.toString());flush()}
                     }
-                }catch(_:Exception){}finally{peer=null}
+                }catch(e:Exception){
+                    if(!closed.get())android.util.Log.w("MeikouRemote","遙控連線未完成 "+e.javaClass.simpleName+" "+e.cause?.javaClass?.simpleName)
+                }finally{peer=null}
             }
         }
     }
     override fun close(){closed.set(true);runCatching{socket.close()};runCatching{peer?.close()}}
     companion object{
-        private const val ALIAS="meikou-remote-v1"
+        private const val ALIAS="meikou-remote-tls-v2"
         private fun hex(bytes:ByteArray)=bytes.joinToString(""){"%02x".format(it.toInt() and 255)}
         private fun fingerprint(cert:X509Certificate)=hex(MessageDigest.getInstance("SHA-256").digest(cert.encoded))
         @Synchronized fun start(ip:Inet4Address,command:(String,JSONObject)->JSONObject):PeerServer{
@@ -67,19 +69,12 @@ internal class PeerServer private constructor(private val socket:SSLServerSocket
                 val generator=KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_EC,"AndroidKeyStore")
                 generator.initialize(KeyGenParameterSpec.Builder(ALIAS,KeyProperties.PURPOSE_SIGN or KeyProperties.PURPOSE_VERIFY)
                     .setAlgorithmParameterSpec(java.security.spec.ECGenParameterSpec("secp256r1"))
-                    .setDigests(KeyProperties.DIGEST_SHA256,KeyProperties.DIGEST_SHA384,KeyProperties.DIGEST_SHA512).build())
+                    .setDigests(KeyProperties.DIGEST_NONE,KeyProperties.DIGEST_SHA256,KeyProperties.DIGEST_SHA384,KeyProperties.DIGEST_SHA512).build())
                 generator.generateKeyPair()
             }
             val cert=store.getCertificate(ALIAS) as X509Certificate
-            val manager=object:X509KeyManager{
-                override fun getClientAliases(t:String?,i:Array<out Principal>?):Array<String>?=null
-                override fun chooseClientAlias(t:Array<out String>?,i:Array<out Principal>?,s:Socket?):String?=null
-                override fun getServerAliases(t:String?,i:Array<out Principal>?)=if(t?.startsWith("EC")==true)arrayOf(ALIAS) else null
-                override fun chooseServerAlias(t:String?,i:Array<out Principal>?,s:Socket?)=getServerAliases(t,i)?.firstOrNull()
-                override fun getCertificateChain(alias:String?)=if(alias==ALIAS)arrayOf(cert) else null
-                override fun getPrivateKey(alias:String?)=if(alias==ALIAS)store.getKey(ALIAS,null) as PrivateKey else null
-            }
-            val context=SSLContext.getInstance("TLS").apply{init(arrayOf(manager),null,SecureRandom())}
+            val managers=KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm()).apply{init(store,null)}
+            val context=SSLContext.getInstance("TLS").apply{init(managers.keyManagers,null,SecureRandom())}
             val socket=context.serverSocketFactory.createServerSocket() as SSLServerSocket
             try{
                 socket.enabledProtocols=socket.supportedProtocols.filter{it=="TLSv1.2" || it=="TLSv1.3"}.toTypedArray()

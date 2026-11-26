@@ -39,7 +39,7 @@ trap 'kill "$receiver" "${extra_receivers[@]}" 2>/dev/null || true' EXIT
 sleep 1
 adb shell am instrument -w -e protocol "$protocol" tw.meikou.live.test/tw.meikou.live.BackgroundCheck | tee build/instrumentation.txt
 if ! grep -q MEIKOU_BACKGROUND_OK build/instrumentation.txt; then
-    adb logcat -d -s MeikouCapture:I MediaCodec:E CCodec:E AndroidRuntime:E | tail -120
+    adb logcat -d -s MeikouCapture:I MeikouRemote:W MediaCodec:E CCodec:E AndroidRuntime:E | tail -120
     cat build/receiver.log
     exit 1
 fi
