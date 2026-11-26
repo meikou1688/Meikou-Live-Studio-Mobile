@@ -56,7 +56,20 @@ class BackgroundCheck : Instrumentation() {
             bitmap.recycle()
             android.net.Uri.fromFile(file).toString()
         }
-        ui { scenes.layers(scenes.active.layers+Overlay(kind="slides",value="",x=.18f,y=.5f,width=.18f,items=slides,slideSeconds=2)) }
+        val wav=java.io.File(targetContext.cacheDir,"music-test.wav")
+        val rate=44100
+        val pcm=java.nio.ByteBuffer.allocate(44+rate*4).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        pcm.put("RIFF".toByteArray()).putInt(36+rate*4).put("WAVEfmt ".toByteArray()).putInt(16)
+        pcm.putShort(1).putShort(2).putInt(rate).putInt(rate*4).putShort(4).putShort(16)
+        pcm.put("data".toByteArray()).putInt(rate*4)
+        for(i in 0 until rate){
+            val tone=(12000*kotlin.math.sin(2*Math.PI*997*i/rate)).toInt().toShort()
+            pcm.putShort(tone).putShort(tone)
+        }
+        wav.writeBytes(pcm.array())
+        ui { scenes.layers(scenes.active.layers+listOf(
+            Overlay(kind="slides",value="",x=.18f,y=.5f,width=.18f,items=slides,slideSeconds=2),
+            Overlay(kind="music",value="",items=listOf(android.net.Uri.fromFile(wav).toString()),volume=50))) }
     }
     override fun onStart(){
         val result=Bundle()

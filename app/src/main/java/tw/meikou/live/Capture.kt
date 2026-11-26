@@ -38,6 +38,7 @@ class Capture(private val ctx:Context, private val preview:Surface?, private val
     private var mic:AudioRecord?=null
     var mixPlayback=false
     private var playback:AudioRecord?=null
+    private val music=MusicTrack(ctx,telemetry)
     private val playbackBuffer=ByteBuffer.allocateDirect(2048)
     var reduceNoise=false
     private var suppressor:android.media.audiofx.NoiseSuppressor?=null
@@ -106,6 +107,7 @@ class Capture(private val ctx:Context, private val preview:Surface?, private val
             runCatching{projection?.stop()}
             runCatching{mic?.stop()}
             runCatching{microphoneThread?.join(2000)}
+            music.close()
             runCatching{compositor?.close()}
             runCatching{playback?.stop()};runCatching{playback?.release()}
             runCatching{suppressor?.release()};runCatching{mic?.release()}
@@ -282,6 +284,7 @@ class Capture(private val ctx:Context, private val preview:Surface?, private val
                     val read=it.read(playbackBuffer,n,AudioRecord.READ_NON_BLOCKING)
                     check(read>=0);mixPcm(buffer,playbackBuffer,read)
                 }
+                music.mix(scenes.active.layers.lastOrNull{it.kind=="music"},buffer,n)
                 val bytes=ByteArray(n)
                 buffer.position(0);buffer.get(bytes)
                 val block=PcmBlock(bytes,nextUs)

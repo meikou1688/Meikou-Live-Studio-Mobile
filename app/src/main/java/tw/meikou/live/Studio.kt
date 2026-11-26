@@ -556,7 +556,7 @@ class Studio:Activity(){
             }
             return
         }
-        if(requestCode in listOf(SceneEditor.PICK_SLIDES,SceneEditor.PICK_CLIPS) && resultCode==RESULT_OK && data!=null)sceneEditor.playlist(data,requestCode==SceneEditor.PICK_CLIPS)
+        if(requestCode in listOf(SceneEditor.PICK_SLIDES,SceneEditor.PICK_CLIPS,SceneEditor.PICK_MUSIC) && resultCode==RESULT_OK && data!=null)sceneEditor.playlist(data,requestCode)
         if(requestCode in listOf(SceneEditor.PICK,SceneEditor.PICK_VIDEO) && resultCode==RESULT_OK)data?.data?.let{sceneEditor.media(it,requestCode==SceneEditor.PICK_VIDEO)}
     }
     private fun savePreviewPhoto(button:Button){

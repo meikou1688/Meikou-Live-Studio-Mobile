@@ -8,7 +8,7 @@ import android.widget.*
 import kotlin.math.*
 
 class SceneEditor(private val host:Activity,private val scenes:Scenes,private val preview:LayerCanvas,private val cleanPreview:(Boolean)->Unit,private val canPick:()->Boolean){
-    companion object{const val PICK=701;const val PICK_VIDEO=702;const val PICK_SLIDES=706;const val PICK_CLIPS=707}
+    companion object{const val PICK=701;const val PICK_VIDEO=702;const val PICK_SLIDES=706;const val PICK_CLIPS=707;const val PICK_MUSIC=708}
     private var selected:String?=null
     private var previousX=0f
     private var previousY=0f
@@ -48,7 +48,7 @@ class SceneEditor(private val host:Activity,private val scenes:Scenes,private va
             }else add(Overlay(kind="image",value=uri.toString(),bitmap=scenes.decode(uri)))
         }catch(e:Exception){toast("無法讀取素材，請重新選擇")}
     }
-    fun playlist(data:Intent,video:Boolean){
+    fun playlist(data:Intent,type:Int){
         val selected=buildList{
             val clips=data.clipData
             if(clips!=null)for(i in 0 until clips.itemCount)add(clips.getItemAt(i).uri)
@@ -58,16 +58,19 @@ class SceneEditor(private val host:Activity,private val scenes:Scenes,private va
         try{
             selected.forEach{host.contentResolver.takePersistableUriPermission(it,Intent.FLAG_GRANT_READ_URI_PERMISSION)}
             val items=selected.map{it.toString()}
-            if(video)add(Overlay(kind="clips",value="",items=items))
+            if(type==PICK_MUSIC){
+                scenes.layers(scenes.active.layers.filterNot{it.kind=="music"}+Overlay(kind="music",value="",items=items))
+                toast("已套用場景背景音樂，錄影或直播時播放")
+            }else if(type==PICK_CLIPS)add(Overlay(kind="clips",value="",items=items))
             else android.app.AlertDialog.Builder(host).setTitle("每張圖片停留時間").setItems(arrayOf("3 秒","5 秒","10 秒","30 秒")){_,i->
                 add(Overlay(kind="slides",value="",items=items,slideSeconds=listOf(3,5,10,30)[i]))
             }.show()
         }catch(e:Exception){toast("無法取得素材的讀取權限")}
     }
-    private fun title(v:Overlay)=when(v.kind){"image"->"圖片／台標";"video"->"影片（靜音循環）";"clock"->"時鐘";"slides"->"圖片播放清單";"clips"->"影片播放清單（靜音）";"date"->"日期";"qr"->"QR Code";"score"->"比分板";"ticker"->"跑馬燈 · "+v.value;else->"文字 · "+v.value}
+    private fun title(v:Overlay)=when(v.kind){"image"->"圖片／台標";"video"->"影片（靜音循環）";"clock"->"時鐘";"music"->"背景音樂播放清單";"slides"->"圖片播放清單";"clips"->"影片播放清單（靜音）";"date"->"日期";"qr"->"QR Code";"score"->"比分板";"ticker"->"跑馬燈 · "+v.value;else->"文字 · "+v.value}
     fun edit(){
         val layers=scenes.active.layers.reversed()
-        val choices=listOf("新增文字","新增圖片／台標","新增跑馬燈","新增時鐘","新增影片（靜音循環）","新增日期","新增 QR Code","新增比分板","新增圖片播放清單","新增影片播放清單（靜音）")+layers.map{title(it)}
+        val choices=listOf("新增文字","新增圖片／台標","新增跑馬燈","新增時鐘","新增影片（靜音循環）","新增日期","新增 QR Code","新增比分板","新增圖片播放清單","新增影片播放清單（靜音）","選擇場景背景音樂")+layers.map{title(it)}
         AlertDialog.Builder(host).setTitle("素材圖層 · "+scenes.active.name).setItems(choices.toTypedArray()){_,i->
             when(i){
                 0->prompt("文字內容"){add(Overlay(kind="text",value=it))}
@@ -80,17 +83,25 @@ class SceneEditor(private val host:Activity,private val scenes:Scenes,private va
                 7->prompt("左隊隊名"){left->prompt("右隊隊名"){right->
                     add(Overlay(kind="score",value=org.json.JSONArray().put(left).put(right).put(0).put(0).toString(),y=.14f))
                 }}
-                8,9->if(canPick()){
+                8,9,10->if(canPick()){
                     val chooser=Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
-                        .setType(if(i==8)"image/*" else "video/*").putExtra(Intent.EXTRA_ALLOW_MULTIPLE,true)
-                    host.startActivityForResult(chooser,if(i==8)PICK_SLIDES else PICK_CLIPS)
+                        .setType(when(i){8->"image/*";9->"video/*";else->"audio/*"}).putExtra(Intent.EXTRA_ALLOW_MULTIPLE,true)
+                    host.startActivityForResult(chooser,when(i){8->PICK_SLIDES;9->PICK_CLIPS;else->PICK_MUSIC})
                 }else toast("請於開播前匯入播放清單")
-                else->actions(layers[i-10])
+                else->actions(layers[i-11])
             }
         }.show()
     }
     private fun modify(v:Overlay){scenes.layers(scenes.active.layers.map{if(it.id==v.id)v else it})}
     private fun actions(v:Overlay){
+        if(v.kind=="music"){
+            val menu=listOf("靜音","音量 25%","音量 50%","音量 75%","音量 100%","移除背景音樂")
+            android.app.AlertDialog.Builder(host).setTitle("背景音樂 · 音量 "+v.volume+"%").setItems(menu.toTypedArray()){_,index->
+                if(index==5)scenes.layers(scenes.active.layers.filterNot{it.id==v.id})
+                else modify(v.copy(volume=index*25))
+            }.show()
+            return
+        }
         val opts=mutableListOf("選取並調整位置",if(v.locked)"解除鎖定" else "鎖定圖層","移到最上層","移到最下層","移除")
         if(v.kind=="text" || v.kind=="ticker")opts.add("修改文字")
         if(v.kind=="score")opts.addAll(listOf("左隊加一分","右隊加一分","左隊減一分","右隊減一分"))

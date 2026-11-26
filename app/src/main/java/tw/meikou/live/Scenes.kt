@@ -10,7 +10,7 @@ import java.util.UUID
 
 data class Overlay(val id:String=UUID.randomUUID().toString(),val kind:String,val value:String,
     val x:Float=.5f,val y:Float=.5f,val width:Float=.35f,val angle:Float=0f,val locked:Boolean=false,
-    val bitmap:Bitmap?=null,val items:List<String> = emptyList(),val slideSeconds:Int=5)
+    val bitmap:Bitmap?=null,val items:List<String> = emptyList(),val slideSeconds:Int=5,val volume:Int=40)
 data class Scene(val id:String=UUID.randomUUID().toString(),val name:String,val layers:List<Overlay> = emptyList())
 data class LayerFrame(val id:String,val x:Float,val y:Float,val width:Float,val height:Float,val angle:Float)
 
@@ -35,7 +35,7 @@ class Scenes(private val ctx:Context){
                         v.getDouble("width").toFloat(),v.getDouble("angle").toFloat(),v.optBoolean("locked"),
                         if(kind=="image")runCatching{decode(Uri.parse(value))}.getOrNull() else null,
                         v.optJSONArray("items")?.let{items->(0 until items.length()).map{items.getString(it)}}.orEmpty(),
-                        v.optInt("slideSeconds",5).coerceIn(1,120))
+                        v.optInt("slideSeconds",5).coerceIn(1,120),v.optInt("volume",40).coerceIn(0,100))
                 })
             }
             if(loaded.isNotEmpty()){all=loaded;active=all.firstOrNull{it.id==json.optString("active")}?:all.first()}
@@ -58,7 +58,7 @@ class Scenes(private val ctx:Context){
         all.forEach{s->
             val layers=JSONArray()
             s.layers.forEach{v->layers.put(JSONObject().put("id",v.id).put("kind",v.kind).put("value",v.value)
-                .put("x",v.x.toDouble()).put("y",v.y.toDouble()).put("width",v.width.toDouble()).put("angle",v.angle.toDouble()).put("locked",v.locked).put("items",JSONArray(v.items)).put("slideSeconds",v.slideSeconds))}
+                .put("x",v.x.toDouble()).put("y",v.y.toDouble()).put("width",v.width.toDouble()).put("angle",v.angle.toDouble()).put("locked",v.locked).put("items",JSONArray(v.items)).put("slideSeconds",v.slideSeconds).put("volume",v.volume))}
             array.put(JSONObject().put("id",s.id).put("name",s.name).put("layers",layers))
         }
         prefs.edit().putString("library",JSONObject().put("version",1).put("active",active.id).put("scenes",array).toString()).apply()

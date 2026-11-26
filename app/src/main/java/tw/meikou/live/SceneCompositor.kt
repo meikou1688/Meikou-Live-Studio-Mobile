@@ -212,7 +212,8 @@ class SceneCompositor(private val ctx:android.content.Context,private val width:
         val obsolete=clips.keys.filter{id->layers.none{it.id==id}}
         obsolete.forEach{clips.remove(it)?.close()}
         val visible=layers.mapNotNull{layer->
-            if(layer.kind=="slides")slide(layer,time)?.let{layer to it}
+            if(layer.kind=="music")null
+            else if(layer.kind=="slides")slide(layer,time)?.let{layer to it}
             else if(layer.kind!="video" && layer.kind!="clips")sprite(layer)?.let{layer to it}
             else{
                 val clip=clip(layer)
