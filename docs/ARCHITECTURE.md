@@ -1,5 +1,10 @@
 # 技術架構
 
+## 0.1.2 實作
+
+Camera2 或 MediaProjection 寫入 SurfaceTexture；SceneCompositor 以 OpenGL ES 2.0 同步畫到預覽及編碼器 Surface。螢幕模式使用獨立前景服務及系統通知停止控制。Capture 把編碼資料分別送入 MediaMuxer、主要 Rtmp 及各額外輸出的獨立佇列。網路中斷時已完整封裝的前段錄影仍可匯出；重連另開檔案。額外路徑故障會停止該路；主要路徑故障會重啟整場傳送。
+
+
 Studio 負責使用者操作、權限、生命週期及狀態。Viewfinder 先建立純預覽工作階段，關閉完成後交付相機給 Capture。Capture 透過 Camera2 將畫面分別送往 SurfaceView 與 MediaCodec 輸入 Surface，透過 AudioRecord 將 PCM 送入 AAC-LC 編碼器。音訊採 48 kHz 單聲道，時間戳記以取樣數推算。影片首幀對齊單調時鐘，切鏡沿用編碼器，實際同步誤差須以實機拍板量測。
 
 Lenses 讀取邏輯與實體相機。估計等效焦距使用實際焦距乘以 36 除以感光元件寬度，作為橫向視角近似值。快捷分類門檻為 22 與 50 mm，僅為操作分類。指定實體鏡頭時，兩個 OutputConfiguration 均設定 physicalCameraId。邏輯相機則使用 CONTROL_ZOOM_RATIO，實際作用中鏡頭可由擷取結果讀取。切換實體鏡頭會重建相機工作階段，可能短暫停格。解析度、影格率及雙輸出組合仍受韌體限制。

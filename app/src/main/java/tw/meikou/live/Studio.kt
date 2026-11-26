@@ -5,7 +5,7 @@ import android.app.*
 import android.os.*
 import android.content.*
 import android.content.pm.PackageManager
-import android.hardware.camera2.CameraManager
+import android.hardware.camera2.*
 import android.net.*
 import android.media.*
 import android.view.*
@@ -36,6 +36,10 @@ class Studio:Activity(){
             setPadding(0,dp(14),0,dp(3))
         }
     }
+    private val scenes by lazy{Scenes(this)}
+    private val portrait get()=resources.configuration.orientation==android.content.res.Configuration.ORIENTATION_PORTRAIT
+    private lateinit var rotateButton:Button
+    private lateinit var sceneEditor:SceneEditor
     private lateinit var preview:SurfaceView
     private lateinit var panel:LinearLayout
     private lateinit var status:TextView
@@ -55,10 +59,88 @@ class Studio:Activity(){
     private var selected:Lens?=null
     private var ending=false
     private var ready=false
+    private var additional=listOf<URI>()
+    private lateinit var outputSummary:TextView
+    private val outputStates=sortedMapOf<Int,String>()
+    private lateinit var editOutputs:Button
+    private fun destination(text:String):URI=URI(text.trim()).also{
+        require(it.scheme in listOf("rtmp","rtmps") && it.host!=null && it.rawPath.trim('/').contains('/') && !it.rawPath.endsWith('/') && it.userInfo==null && it.fragment==null)
+    }
+    private fun editDestinations(){
+        val field=EditText(this).apply{
+            inputType=android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+            isSingleLine=false;minLines=3;isSaveEnabled=false;hint="每行一個完整推流網址";setText(additional.joinToString("\n"))
+        }
+        val dialog=AlertDialog.Builder(this).setTitle("新增同步推流目的地（最多五路）").setView(field).setPositiveButton("儲存",null).setNegativeButton("取消",null).create()
+        dialog.show()
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener{
+            val urls=runCatching{field.text.lines().filter{it.isNotBlank()}.map(::destination).also{require(it.size<=5 && it.distinct().size==it.size)}}.getOrNull()
+            if(urls==null)field.error="請確認網址格式、數量及重複項目"
+            else{additional=urls;outputSummary.text="額外目的地："+urls.size;dialog.dismiss()}
+        }
+    }
+    private lateinit var saveLive:CheckBox
+    private lateinit var mute:Switch
     private lateinit var inputs:Spinner
     private val handlers=Handler(Looper.getMainLooper())
     private var attempts=0
     private var waiting=false
+    private var exposureCompensation=0
+    private var settings=CameraSettings()
+    private fun applySettings(value:CameraSettings){settings=value;finder?.configure(value);capture?.configure(value)}
+    private fun choose(title:String,items:List<String>,select:(Int)->Unit){
+        AlertDialog.Builder(this).setTitle(title).setItems(items.toTypedArray()){_,index->select(index)}.show()
+    }
+    private fun professional(){
+        val lens=selected?:return
+        val info=(getSystemService(CAMERA_SERVICE) as CameraManager).getCameraCharacteristics(lens.parent)
+        val focus=info[CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE]?:0f
+        val wb=(info[CameraCharacteristics.CONTROL_AWB_AVAILABLE_MODES] ?: intArrayOf()).filter{it>0}
+        val iso=info[CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE]
+        val times=info[CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE]
+        val manual=info[CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES]?.contains(CameraMetadata.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_SENSOR)==true
+        val menu=mutableListOf<Pair<String,()->Unit>>()
+        if(focus>0 && info[CameraCharacteristics.CONTROL_AF_AVAILABLE_MODES]?.contains(CameraMetadata.CONTROL_AF_MODE_OFF)==true){
+            menu.add("對焦距離" to {
+                val steps=listOf<Float?>(null,0f,focus/4,focus/2,focus*3/4,focus)
+                choose("對焦距離",steps.map{when(it){null->"自動";0f->"無限遠";else->"約 %.2f 公尺".format(1f/it)}}){applySettings(settings.copy(focus=steps[it]))}
+            })
+        }
+        if(wb.isNotEmpty())menu.add("白平衡" to {
+            val labels=listOf("關閉","自動","白熾燈","螢光燈","暖色螢光燈","晴天","陰天","黃昏","陰影")
+            choose("白平衡",wb.map{labels.getOrElse(it){"模式 "+it}}){applySettings(settings.copy(whiteBalance=wb[it]))}
+        })
+        if(manual && iso!=null && times!=null)menu.add("感光度與快門" to {
+            val values=(listOf(iso.lower)+listOf(50,100,200,400,800,1600,3200,6400).filter{iso.contains(it)}+iso.upper).distinct()
+            choose("ISO 感光度",listOf("自動曝光")+values.map{"ISO "+it}){i->
+                if(i==0)applySettings(settings.copy(iso=null,exposureNs=null))
+                else{
+                    val fps=profile?.fps ?: (rates.selectedItem as? Int ?:30)
+                    val maximum=minOf(times.upper,1_000_000_000L/fps)
+                    val durations=(listOf(maximum)+listOf(60,100,125,250,500,1000,2000).map{1_000_000_000L/it}).filter{times.contains(it) && it<=maximum}.distinct()
+                    if(durations.isNotEmpty())choose("快門時間",durations.map{"1/"+(1_000_000_000L/it)+" 秒"}){j->applySettings(settings.copy(iso=values[i-1],exposureNs=durations[j]))}
+                }
+            }
+        })
+        menu.add("還原相機自動設定" to {applySettings(CameraSettings());exposureCompensation=0;finder?.exposure(0);capture?.changeExposure(0)})
+        choose("專業相機",menu.map{it.first}){menu[it].second.invoke()}
+    }
+    private fun selectExposure(){
+        val lens=selected?:return
+        val manager=getSystemService(CAMERA_SERVICE) as CameraManager
+        val info=manager.getCameraCharacteristics(lens.parent)
+        val range=info[android.hardware.camera2.CameraCharacteristics.CONTROL_AE_COMPENSATION_RANGE]?:return
+        val step=info[android.hardware.camera2.CameraCharacteristics.CONTROL_AE_COMPENSATION_STEP]?.toFloat()?:return
+        if(range.lower==range.upper || step<=0){Toast.makeText(this,ui("ev_unsupported"),Toast.LENGTH_SHORT).show();return}
+        val indices=(range.lower..range.upper).toList()
+        val labels=indices.map{String.format(java.util.Locale.TAIWAN,"%+.2f EV",it*step)}.toTypedArray()
+        AlertDialog.Builder(this).setTitle(ui("ev")).setSingleChoiceItems(labels,indices.indexOf(exposureCompensation)){dialog,index->
+            exposureCompensation=indices[index]
+            finder?.exposure(exposureCompensation)
+            capture?.changeExposure(exposureCompensation)
+            dialog.dismiss()
+        }.show()
+    }
     private var finder:Viewfinder?=null
     private var afterClose:(()->Unit)?=null
     private fun stopPreview(next:(()->Unit)?=null){
@@ -67,14 +149,16 @@ class Studio:Activity(){
         if(old==null){afterClose=null;next?.invoke()}else old.stop()
     }
     private fun previewSelected(){
-        if(!ready || !visible || capture!=null || finder!=null || !granted())return
+        if(ScreenService.running || !ready || !visible || capture!=null || finder!=null || !granted())return
         val l=selected?:return
         val size=l.sizes.minByOrNull{kotlin.math.abs(it.width-1280)}?:return
-        preview.holder.setFixedSize(size.width,size.height)
-        val view=Viewfinder(this,l,preview.holder.surface,{if(visible)status.text="這個鏡頭的預覽組合無法啟動"},{
+        val w=if(portrait)size.height else size.width
+        val h=if(portrait)size.width else size.height
+        preview.holder.setFixedSize(w,h)
+        val view=Viewfinder(this,l,preview.holder.surface,w,h,scenes,settings,{if(visible)status.text="這個鏡頭的預覽組合無法啟動"},{
             finder=null;val next=afterClose;afterClose=null;if(visible && ready)next?.invoke()
         })
-        finder=view;view.start()
+        finder=view;view.exposure(exposureCompensation);view.start()
     }
     private var visible=false
     private var devices=listOf<AudioDeviceInfo>()
@@ -100,25 +184,26 @@ class Studio:Activity(){
         bar.addView(logo,dp(158),dp(34))
         monitorName=TextView(this).apply{gravity=Gravity.CENTER_VERTICAL or Gravity.END;textSize=14f}
         bar.addView(monitorName,LinearLayout.LayoutParams(0,-1,1f))
-        val root=LinearLayout(this)
+        val root=LinearLayout(this).apply{orientation=if(portrait)1 else 0}
         page.addView(root,LinearLayout.LayoutParams(-1,0,1f))
         preview=SurfaceView(this)
         val frame=FrameLayout(this);monitorArea=frame;monitorState(false)
         frame.addView(preview,FrameLayout.LayoutParams(-1,-1,Gravity.CENTER))
         frame.addOnLayoutChangeListener{_,left,top,right,bottom,_,_,_,_->
-            val width=minOf(right-left,(bottom-top)*16/9)
-            val height=width*9/16
+            val ratio=if(portrait)9f/16 else 16f/9
+            val width=minOf(right-left,((bottom-top)*ratio).toInt())
+            val height=(width/ratio).toInt()
             if(width>0 && (preview.layoutParams.width!=width || preview.layoutParams.height!=height))
                 preview.layoutParams=FrameLayout.LayoutParams(width,height,Gravity.CENTER)
         }
-        root.addView(frame,LinearLayout.LayoutParams(0,-1,1f))
+        root.addView(frame,if(portrait)LinearLayout.LayoutParams(-1,0,1.3f) else LinearLayout.LayoutParams(0,-1,1f))
         page.setOnApplyWindowInsetsListener{v,insets->
             val padding=insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
             v.setPadding(padding.left,padding.top,padding.right,padding.bottom);insets
         }
         val controls=LinearLayout(this).apply{orientation=1;setBackgroundColor(color("#1c1e26"));setPadding(dp(10),0,dp(10),dp(4))}
         val controlWidth=(resources.configuration.screenWidthDp*0.33).toInt().coerceIn(218,300)
-        root.addView(controls,LinearLayout.LayoutParams(dp(controlWidth),-1))
+        root.addView(controls,if(portrait)LinearLayout.LayoutParams(-1,0,1f) else LinearLayout.LayoutParams(dp(controlWidth),-1))
         val scroll=ScrollView(this)
         panel=LinearLayout(this).apply{orientation=1}
         scroll.addView(panel);controls.addView(scroll,LinearLayout.LayoutParams(-1,0,1f))
@@ -126,14 +211,25 @@ class Studio:Activity(){
         status=label(ui("idle"));status.setTextColor(color("#e6e8ec"))
         netText=label("網路 · 檢查中");reading=label("尚未擷取")
         section("鏡頭控制")
+        rotateButton=button(if(portrait)"切換為橫式" else "切換為直式"){
+            requestedOrientation=if(portrait)android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE else android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        }
+        panel.addView(CheckBox(this).apply{text="自拍鏡像";setOnCheckedChangeListener{_,on->scenes.mirrorSelfie=on}})
         shortcuts=LinearLayout(this);panel.addView(shortcuts)
         lenses=spinner(ui("lens"));section("影音設定");sizes=spinner(ui("resolution"));rates=spinner(ui("fps"));bits=spinner(ui("bitrate"))
         options(bits,listOf(2,4,6,8,12));bits.setSelection(1)
+        mute=Switch(this).apply{
+            text=ui("mute_mic")
+            setOnCheckedChangeListener{_,enabled->capture?.microphoneMuted?.set(enabled)}
+        }
+        panel.addView(mute)
         inputs=spinner(ui("input_device"))
         val sound=getSystemService(AUDIO_SERVICE) as AudioManager
         devices=sound.getDevices(AudioManager.GET_DEVICES_INPUTS).toList()
         options(inputs,listOf(ui("system_default"))+devices.map{it.productName.toString()+" · "+it.id})
         codecs=spinner(ui("codec"));options(codecs,listOf("H.264","H.265（限錄影）"))
+        button("專業相機"){professional()}
+        button(ui("ev")){selectExposure()}
         val zoomLabel=label("系統變焦 1.0×")
         zoom=SeekBar(this);zoom.max=100;panel.addView(zoom)
         zoom.setOnSeekBarChangeListener(object:SeekBar.OnSeekBarChangeListener{
@@ -144,13 +240,24 @@ class Studio:Activity(){
             override fun onStartTrackingTouch(s:SeekBar){}
             override fun onStopTrackingTouch(s:SeekBar){}
         })
+        section("場景與素材")
+        sceneEditor=SceneEditor(this,scenes,preview){capture==null}
+        button("選擇或新增場景"){sceneEditor.chooseScene()}
+        button("編輯素材圖層"){sceneEditor.edit()}
         section("串流輸出")
         address=EditText(this).apply{hint="RTMP／RTMPS 完整推流網址";setSingleLine();inputType=android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD;isSaveEnabled=false}
         address.background=box("#20222b","#3a3e4c",4)
         address.setPadding(dp(10),dp(6),dp(10),dp(6));address.textSize=14f
         panel.addView(address)
+        editOutputs=button("管理多路推流"){editDestinations()}
+        outputSummary=label("額外目的地：0")
+        saveLive=CheckBox(this).apply{text=ui("save_live")}
+        panel.addView(saveLive)
         live=button(ui("go_live")){begin(true)}
         record=button(ui("record")){begin(false)}
+        button("螢幕分享／錄影"){screenMenu()}
+        val photo=button(ui("photo")){}
+        photo.setOnClickListener{savePreviewPhoto(photo)}
         button(ui("diagnostics")){hardware()}
         val transport=LinearLayout(this).apply{gravity=Gravity.CENTER;setPadding(0,dp(5),0,0)}
         controls.addView(transport,-1,-2)
@@ -167,10 +274,11 @@ class Studio:Activity(){
                 val next=lenses.selectedItem as? Lens?:return
                 if(selected==next)return
                 val running=profile
-                if(running!=null && (next.sizes.none{it.width==running.width && it.height==running.height} || running.fps !in next.rates)){
+                if(running!=null && (next.sizes.none{it.width==maxOf(running.width,running.height) && it.height==minOf(running.width,running.height)} || running.fps !in next.rates)){
                     status.text="這顆鏡頭不支援目前規格，請停止後再更改。";lenses.setSelection((0 until lenses.count).first{lenses.getItemAtPosition(it)==selected});return
                 }
                 selected=next
+                exposureCompensation=0;settings=CameraSettings()
                 if(running==null){options(sizes,next.sizes);sizes.setSelection(next.sizes.indexOfFirst{it.width==1280}.coerceAtLeast(0))
                     options(rates,next.rates);rates.setSelection(next.rates.indexOf(30).coerceAtLeast(0))}
                 zoom.isEnabled=next.zoomMax>next.zoomMin;zoom.progress=(0..100).minByOrNull{kotlin.math.abs(zoomRatio(next,it)-1f)}?:0
@@ -234,56 +342,118 @@ class Studio:Activity(){
         AlertDialog.Builder(this).setTitle(ui("hardware")).setMessage(text).setNeutralButton(ui("copy")){_,_->(getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager).setPrimaryClip(ClipData.newPlainText("Meikou Live",text))}.setPositiveButton(ui("close"),null).show()
     }
     private fun begin(stream:Boolean){
+        if(ScreenService.running){status.text="請先停止螢幕分享";return}
         if(waiting){cancelRetry();status.text="已取消重新連線";live.text=ui("go_live");return}
         if(capture!=null){ending=true;capture?.stop();status.text="正在停止";return}
         if(!ready || !granted()){status.text="請確認預覽區及相機、麥克風權限";return}
         val l=selected?:return
         val size=sizes.selectedItem as? android.util.Size?:return
         val fps=rates.selectedItem as? Int?:return
-        val p=Profile(size.width,size.height,fps,(bits.selectedItem as Int)*1000000,codecs.selectedItemPosition==1)
+        val p=Profile(if(portrait)size.height else size.width,if(portrait)size.width else size.height,fps,(bits.selectedItem as Int)*1000000,codecs.selectedItemPosition==1)
         val uri=if(stream)runCatching{URI(address.text.toString().trim()).also{require(it.scheme in listOf("rtmp","rtmps") && it.host!=null && it.rawPath.trim('/').contains('/') && !it.rawPath.endsWith('/') && it.userInfo==null)}}.getOrNull() else null
         if(stream && (uri==null || p.hevc)){status.text="直播請選用 H.264，並輸入含串流金鑰的完整網址。";return}
+        if(stream && uri in additional){status.text="主要與額外目的地重複";return}
         if(finder!=null){stopPreview{begin(stream)};return}
+        outputStates.clear()
         val folder=getExternalFilesDir(Environment.DIRECTORY_MOVIES)
-        if(!stream && folder==null){status.text="無法使用錄影資料夾";return}
-        val file=if(stream)null else File(folder,"Meikou-"+System.currentTimeMillis()+".mp4")
+        val recordFile=!stream || saveLive.isChecked
+        if(recordFile && folder==null){status.text="無法使用錄影資料夾";return}
+        val file=if(!recordFile)null else File(folder,"Meikou-"+System.currentTimeMillis()+".mp4")
         preview.holder.setFixedSize(p.width,p.height)
         ending=false;profile=p;status.text="正在啟動影音擷取"
-        listOf(inputs,sizes,rates,bits,codecs,address).forEach{it.isEnabled=false}
+        listOf(rotateButton,editOutputs,saveLive,inputs,sizes,rates,bits,codecs,address).forEach{it.isEnabled=false}
         live.isEnabled=stream;record.isEnabled=!stream
         if(stream)live.text=ui("stop_live") else record.text=ui("stop_record")
-        capture=Capture(this,preview.holder.surface,p,l,devices.getOrNull(inputs.selectedItemPosition-1),zoomRatio(l,zoom.progress),{s->runOnUiThread{reading.text=s}},uri,file,
-            {mode->runOnUiThread{if(!ending){monitorState(mode==1);status.text=if(mode==1)"直播中 · 已送出影音" else "錄影中"}}},
-            {ok,networkError->
-                val saved=if(ok && file!=null)saveMovie(file) else null
+        capture=Capture(this,preview.holder.surface,p,scenes,l,devices.getOrNull(inputs.selectedItemPosition-1),zoomRatio(l,zoom.progress),exposureCompensation,settings,{s->runOnUiThread{reading.text=s}},uri,if(stream)additional else emptyList(),{index,value->runOnUiThread{
+            outputStates[index]=value;outputSummary.text=outputStates.entries.joinToString("  "){"目的地 "+it.key+"："+it.value}
+        }},file,
+            {mode->runOnUiThread{if(!ending){monitorState(mode==1);status.text=when{mode!=1->"錄影中";file!=null->"直播中 · 同步錄影中";else->"直播中 · 已送出影音"}}}},
+            {ok,networkError,recorded->
+                val saved=if(recorded && file!=null)saveMovie(file) else null
                 runOnUiThread{capture=null;profile=null;monitorState(false)
-                listOf(inputs,sizes,rates,bits,codecs,address,live,record).forEach{it.isEnabled=true}
+                listOf(rotateButton,editOutputs,saveLive,inputs,sizes,rates,bits,codecs,address,live,record).forEach{it.isEnabled=true}
                 live.text=ui("go_live");record.text=ui("record");reading.text="已停止擷取"
-                status.text=if(!ok)"擷取或傳輸未完成，請檢查鏡頭、編碼規格與連線。" else saved?.let{"已儲存 "+it} ?: "直播已結束"
+                status.text=when{
+                    saved!=null && !ok->"傳輸中斷，已儲存 "+saved
+                    saved!=null->"已儲存 "+saved
+                    file!=null || !ok->"擷取、傳輸或錄影未完成，請檢查設備與連線。"
+                    else->"直播已結束"
+                }
                 if(stream && networkError && !ending && visible && attempts<3){
                     attempts++;waiting=true;val delay=1000L shl attempts
                     status.text="連線中斷，"+(delay/1000)+" 秒後重試（"+attempts+"/3）"
                     live.text="取消重新連線"
                     handlers.postDelayed({waiting=false;if(visible && capture==null)begin(true)},delay)
                 }else{attempts=0;previewSelected()}
-            }}).also{it.start()}
+            }}).also{it.microphoneMuted.set(mute.isChecked);it.start()}
     }
-    private fun saveMovie(file:File):String{
-        val values=ContentValues().apply{
-            put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME,file.name)
-            put(android.provider.MediaStore.MediaColumns.MIME_TYPE,"video/mp4")
-            put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH,"Movies/Meikou Live")
-            put(android.provider.MediaStore.MediaColumns.IS_PENDING,1)
+    private var pendingScreen:Intent?=null
+    private fun screenMenu(){
+        if(ScreenService.running){startService(Intent(this,ScreenService::class.java).setAction(ScreenService.STOP));return}
+        if(capture!=null || waiting || !granted()){status.text="請先停止相機直播或錄影，並允許麥克風權限";return}
+        choose("螢幕分享",listOf("直播螢幕與麥克風","錄製螢幕與麥克風")){choice->
+            val url=if(choice==0)runCatching{destination(address.text.toString())}.getOrNull() else null
+            if(choice==0 && (url==null || url in additional)){status.text="請先設定有效且不重複的推流網址";return@choose}
+            val size=sizes.selectedItem as? android.util.Size ?:android.util.Size(1280,720)
+            pendingScreen=Intent(this,ScreenService::class.java).apply{
+                putExtra("w",if(portrait)size.height else size.width);putExtra("h",if(portrait)size.width else size.height)
+                putExtra("fps",rates.selectedItem as? Int ?:30);putExtra("bitrate",((bits.selectedItem as? Int)?:4)*1000000)
+                putExtra("target",url?.toString());putExtra("record",saveLive.isChecked);putExtra("muted",mute.isChecked)
+                putExtra("input",devices.getOrNull(inputs.selectedItemPosition-1)?.id?:-1)
+                putStringArrayListExtra("additional",ArrayList(if(choice==0)additional.map{it.toString()} else emptyList()))
+            }
+            val manager=getSystemService(MEDIA_PROJECTION_SERVICE) as android.media.projection.MediaProjectionManager
+            startActivityForResult(manager.createScreenCaptureIntent(),703)
         }
-        val uri=runCatching{contentResolver.insert(android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI,values)}.getOrNull()?:return file.absolutePath
-        return try{
-            file.inputStream().use{input->requireNotNull(contentResolver.openOutputStream(uri)).use{input.copyTo(it)}}
-            values.clear();values.put(android.provider.MediaStore.MediaColumns.IS_PENDING,0)
-            check(contentResolver.update(uri,values,null,null)==1)
-            file.delete()
-            "Movies/Meikou Live/"+file.name
-        }catch(e:Exception){runCatching{contentResolver.delete(uri,null,null)};file.absolutePath}
     }
+    override fun onActivityResult(requestCode:Int,resultCode:Int,data:Intent?){
+        super.onActivityResult(requestCode,resultCode,data)
+        if(requestCode==703){
+            val session=pendingScreen;pendingScreen=null
+            if(resultCode==RESULT_OK && data!=null && session!=null){
+                stopPreview();session.putExtra("consent",data)
+                startForegroundService(session)
+                status.text="已要求開始螢幕擷取，可由系統通知停止"
+            }
+            return
+        }
+        if(requestCode in listOf(SceneEditor.PICK,SceneEditor.PICK_VIDEO) && resultCode==RESULT_OK)data?.data?.let{sceneEditor.media(it,requestCode==SceneEditor.PICK_VIDEO)}
+    }
+    private fun savePreviewPhoto(button:Button){
+        val holder=preview.holder
+        if(!ready || !holder.surface.isValid){status.text=ui("photo_unavailable");return}
+        val size=holder.surfaceFrame
+        if(size.width()<=0 || size.height()<=0){status.text=ui("photo_unavailable");return}
+        button.isEnabled=false
+        val bitmap=android.graphics.Bitmap.createBitmap(size.width(),size.height(),android.graphics.Bitmap.Config.ARGB_8888)
+        try{
+            PixelCopy.request(preview,bitmap,{result->
+                if(result!=PixelCopy.SUCCESS){
+                    bitmap.recycle();button.isEnabled=true
+                    Toast.makeText(this,ui("photo_unavailable"),Toast.LENGTH_SHORT).show()
+                }else kotlin.concurrent.thread(name="Save photo"){
+                    var uri:android.net.Uri?=null
+                    val ok=runCatching{
+                        val values=ContentValues().apply{
+                            put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME,"Meikou-"+System.currentTimeMillis()+".jpg")
+                            put(android.provider.MediaStore.MediaColumns.MIME_TYPE,"image/jpeg")
+                            put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH,"Pictures/Meikou Live")
+                            put(android.provider.MediaStore.MediaColumns.IS_PENDING,1)
+                        }
+                        val dest=requireNotNull(contentResolver.insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI,values))
+                        uri=dest
+                        requireNotNull(contentResolver.openOutputStream(dest)).use{check(bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG,95,it))}
+                        values.clear();values.put(android.provider.MediaStore.MediaColumns.IS_PENDING,0)
+                        check(contentResolver.update(dest,values,null,null)==1)
+                    }.isSuccess
+                    if(!ok)uri?.let{runCatching{contentResolver.delete(it,null,null)}}
+                    bitmap.recycle()
+                    runOnUiThread{button.isEnabled=true;Toast.makeText(this,ui(if(ok)"photo_saved" else "photo_unavailable"),Toast.LENGTH_SHORT).show()}
+                }
+            },handlersForPhotos)
+        }catch(e:Exception){bitmap.recycle();button.isEnabled=true;Toast.makeText(this,ui("photo_unavailable"),Toast.LENGTH_SHORT).show()}
+    }
+    private val handlersForPhotos=Handler(Looper.getMainLooper())
     override fun onStop(){super.onStop();visible=false;stopPreview();cancelRetry();ending=true;capture?.stop()}
     override fun onDestroy(){network.unregisterNetworkCallback(monitor);super.onDestroy()}
 }

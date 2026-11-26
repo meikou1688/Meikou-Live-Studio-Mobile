@@ -6,7 +6,7 @@ import android.util.Size
 import java.util.Locale
 
 data class Lens(val parent:String,val physical:String?,val focal:FloatArray,val sensorWidth:Float?,
-                val sizes:List<Size>,val rates:List<Int>,val zoomMin:Float,val zoomMax:Float,val front:Boolean) {
+                val sizes:List<Size>,val rates:List<Int>,val zoomMin:Float,val zoomMax:Float,val front:Boolean,val sensorOrientation:Int) {
     val equivalent:Float? get()=sensorWidth?.takeIf{it>0}?.let{width->focal.firstOrNull()?.times(36f/width)}
     override fun toString():String {
         val prefix=if(front)"前鏡頭" else "後鏡頭"
@@ -25,8 +25,13 @@ fun inventory(m:CameraManager):List<Lens> = buildList{
             if(sizes.isEmpty())continue
             val zoom=parent[CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE]
             val rates=c[CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES].orEmpty().map{it.upper}.distinct().sorted()
-            add(Lens(id,physical,c[CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS]?:floatArrayOf(),c[CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE]?.width,sizes,rates,if(physical==null)zoom?.lower?:1f else 1f,if(physical==null)zoom?.upper?:1f else 1f,c[CameraCharacteristics.LENS_FACING]==CameraCharacteristics.LENS_FACING_FRONT))
+            add(Lens(id,physical,c[CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS]?:floatArrayOf(),c[CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE]?.width,sizes,rates,if(physical==null)zoom?.lower?:1f else 1f,if(physical==null)zoom?.upper?:1f else 1f,c[CameraCharacteristics.LENS_FACING]==CameraCharacteristics.LENS_FACING_FRONT,c[CameraCharacteristics.SENSOR_ORIENTATION]?:90))
         }
     }
 }.sortedBy{it.front}
 
+
+internal fun Lens.rotation(ctx:android.content.Context):Int {
+    val rotation=(ctx.getSystemService(android.content.Context.WINDOW_SERVICE) as android.view.WindowManager).defaultDisplay.rotation*90
+    return (sensorOrientation + (if(front) rotation else -rotation) + 360)%360
+}

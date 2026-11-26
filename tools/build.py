@@ -31,7 +31,7 @@ def build():
     if not key.exists():
         key=out/"debug.keystore"
         if not key.exists():run(jdk/"bin/keytool.exe","-genkeypair","-keystore",key,"-storepass","android","-keypass","android","-alias","androiddebugkey","-keyalg","RSA","-validity","10000","-dname","CN=Android Debug")
-    apk=out/"Meikou-Live-Mobile-0.1.1.apk"
+    apk=out/"Meikou-Live-Mobile-0.1.2.apk"
     run(java,"-jar",bt/"lib/apksigner.jar","sign","--ks",key,"--ks-key-alias","androiddebugkey","--ks-pass","pass:android","--out",apk,aligned)
     run(java,"-jar",bt/"lib/apksigner.jar","verify","--verbose",apk)
     run(bt/"aapt.exe","dump","badging",apk)

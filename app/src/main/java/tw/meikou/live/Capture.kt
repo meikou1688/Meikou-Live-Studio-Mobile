@@ -16,11 +16,15 @@ import kotlin.concurrent.thread
 data class Profile(val width:Int,val height:Int,val fps:Int,val bitrate:Int,val hevc:Boolean)
 private data class Frame(val audio:Boolean,val pts:Long,val flags:Int,val bytes:ByteArray)
 
-class Capture(private val ctx:Context, private val preview:Surface, private val profile:Profile,
-              private var lens:Lens, private val inputDevice:AudioDeviceInfo?, private val initialZoom:Float, private val telemetry:(String)->Unit, private val target:URI?, private val file:File?, private val notify:(Int)->Unit,
-              private val finished:(Boolean,Boolean)->Unit) {
+class Capture(private val ctx:Context, private val preview:Surface?, private val profile:Profile,private val scenes:Scenes,
+              private var lens:Lens?, private val inputDevice:AudioDeviceInfo?, private val initialZoom:Float, private var exposureIndex:Int, private var settings:CameraSettings, private val telemetry:(String)->Unit, private val target:URI?, additional:List<URI>, outputStatus:(Int,String)->Unit, private val file:File?, private val notify:(Int)->Unit,
+              private val finished:(Boolean,Boolean,Boolean)->Unit,
+              private val projection:android.media.projection.MediaProjection?=null) {
+    private var virtualDisplay:android.hardware.display.VirtualDisplay?=null
+    private val projectionCallback=object:android.media.projection.MediaProjection.Callback(){override fun onStop(){stop()}}
     private val stopping=AtomicBoolean()
     private val bad=AtomicBoolean()
+    private val extra=ExtraOutputs(additional,outputStatus)
     private val client=target?.let{Rtmp(it)}
     private val camThread=HandlerThread("Camera")
     private var camera:CameraDevice?=null
@@ -29,7 +33,11 @@ class Capture(private val ctx:Context, private val preview:Surface, private val 
     private var audio:MediaCodec?=null
     private var mic:AudioRecord?=null
     private var encoderSurface:Surface?=null
+    private var compositor:SceneCompositor?=null
     private var mux:MediaMuxer?=null
+    val microphoneMuted=AtomicBoolean()
+    private val recorded=BooleanArray(2)
+    private var recordingFailed=false
     private var muxStarted=false
     private val tracks=IntArray(2){-1}
     private val pending=ArrayList<Frame>()
@@ -47,16 +55,24 @@ class Capture(private val ctx:Context, private val preview:Surface, private val 
     private val cameraReady=CountDownLatch(1)
     private val cameraLock=Any()
 
-    fun stop(){stopping.set(true);client?.close();cameraReady.countDown()}
+    fun stop(){stopping.set(true);client?.close();extra.close();cameraReady.countDown()}
     private fun fail(){bad.set(true);stop()}
     fun start()=thread(name="Capture") {
         try {
             camThread.start()
             try { client?.connect() } catch(e:java.io.IOException){onlineFailure=true;throw e}
             if(!stopping.get()){
+                extra.start()
                 prepare()
-                openCamera()
-                check(cameraReady.await(8,TimeUnit.SECONDS))
+                if(projection!=null){
+                    projection.registerCallback(projectionCallback,Handler(camThread.looper))
+                    virtualDisplay=requireNotNull(projection.createVirtualDisplay("Meikou Live",profile.width,profile.height,
+                        ctx.resources.displayMetrics.densityDpi,android.hardware.display.DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                        compositor!!.input,null,Handler(camThread.looper)))
+                }else{
+                    openCamera()
+                    check(cameraReady.await(8,TimeUnit.SECONDS))
+                }
                 if(!stopping.get()){
                     startNs=System.nanoTime()
                     mic!!.startRecording()
@@ -69,8 +85,12 @@ class Capture(private val ctx:Context, private val preview:Surface, private val 
         finally{
             stopping.set(true)
             synchronized(cameraLock){runCatching{session?.close()};runCatching{camera?.close()}}
+            runCatching{virtualDisplay?.release()}
+            runCatching{projection?.unregisterCallback(projectionCallback)}
+            runCatching{projection?.stop()}
+            runCatching{compositor?.close()}
             runCatching{mic?.stop()};runCatching{mic?.release()}
-            if(file!=null && muxStarted && !bad.get()){
+            if(muxStarted && !recordingFailed){
                 runCatching{video!!.signalEndOfInputStream();val id=audio!!.dequeueInputBuffer(20000)
                     if(id>=0)audio!!.queueInputBuffer(id,0,0,audioOrigin+samples*1000000/48000,MediaCodec.BUFFER_FLAG_END_OF_STREAM)
                     repeat(12){drain(video!!,false);drain(audio!!,true);Thread.sleep(5)}
@@ -78,11 +98,12 @@ class Capture(private val ctx:Context, private val preview:Surface, private val 
             }
             listOf(video,audio).forEach{runCatching{it?.stop()};runCatching{it?.release()}}
             runCatching{encoderSurface?.release()}
-            if(muxStarted)runCatching{mux!!.stop()}.onFailure{bad.set(true)}
-            runCatching{mux?.release()};client?.close();camThread.quitSafely()
+            if(muxStarted)runCatching{mux!!.stop()}.onFailure{recordingFailed=true}
+            runCatching{mux?.release()};client?.close();extra.close();camThread.quitSafely()
             val ok=!bad.get() && delivered.all{it}
-            if(!ok)file?.delete()
-            finished(ok,onlineFailure)
+            val saved=muxStarted && !recordingFailed && recorded.all{it}
+            if(!saved)file?.delete()
+            finished(ok,onlineFailure,saved)
         }
     }
     @SuppressLint("MissingPermission")
@@ -99,6 +120,7 @@ class Capture(private val ctx:Context, private val preview:Surface, private val 
                 runCatching{it.getCapabilitiesForType(mime).isFormatSupported(vf)}.getOrDefault(false)
         }
         video=(chosen?.let{MediaCodec.createByCodecName(it.name)} ?: MediaCodec.createEncoderByType(mime)).also{video=it;it.configure(vf,null,null,MediaCodec.CONFIGURE_FLAG_ENCODE);encoderSurface=it.createInputSurface();it.start()}
+        compositor=SceneCompositor(ctx,profile.width,profile.height,preview,lens,encoderSurface!!,scenes){fail()}
         val af=MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_AAC,48000,1).apply{
             setInteger(MediaFormat.KEY_AAC_PROFILE,MediaCodecInfo.CodecProfileLevel.AACObjectLC);setInteger(MediaFormat.KEY_BIT_RATE,96000)}
         audio=MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_AUDIO_AAC).also{audio=it;it.configure(af,null,null,MediaCodec.CONFIGURE_FLAG_ENCODE);it.start()}
@@ -112,7 +134,7 @@ class Capture(private val ctx:Context, private val preview:Surface, private val 
     @SuppressLint("MissingPermission")
     private fun openCamera(){
         val manager=ctx.getSystemService(Context.CAMERA_SERVICE) as CameraManager
-        val selected=lens
+        val selected=requireNotNull(lens)
         val id=selected.parent
         val generation=++revision
         val handler=Handler(camThread.looper)
@@ -121,7 +143,7 @@ class Capture(private val ctx:Context, private val preview:Surface, private val 
                 if(stopping.get() || generation!=revision){c.close();return}
                 camera=c
                 try{
-                    val surfaces=listOf(preview,encoderSurface!!)
+                    val surfaces=listOf(compositor!!.input)
                     val request=c.createCaptureRequest(CameraDevice.TEMPLATE_RECORD).apply{
                         surfaces.forEach{addTarget(it)}
                         val ranges=manager.getCameraCharacteristics(id)[CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES].orEmpty()
@@ -134,7 +156,7 @@ class Capture(private val ctx:Context, private val preview:Surface, private val 
                     val callback=object:CameraCaptureSession.StateCallback(){
                         override fun onConfigured(s:CameraCaptureSession){synchronized(cameraLock){
                             if(stopping.get() || generation!=revision){s.close();return}
-                            try{session=s;builder=request;applyRequest();cameraReady.countDown()}catch(e:Exception){fail()}
+                            try{session=s;builder=request;baseline=request.build();applyRequest();cameraReady.countDown()}catch(e:Exception){fail()}
                         }}
                         override fun onConfigureFailed(s:CameraCaptureSession){s.close();if(generation==revision)fail()}
                     }
@@ -146,11 +168,20 @@ class Capture(private val ctx:Context, private val preview:Surface, private val 
         },handler)
     }
     private var revision=0
+    private var baseline:CaptureRequest?=null
     private var builder:CaptureRequest.Builder?=null
+    fun configure(value:CameraSettings){
+        if(camThread.isAlive)Handler(camThread.looper).post{
+            if(!stopping.get())try{settings=value;applyRequest()}catch(e:Exception){fail()}
+        }
+    }
     private var zoom=initialZoom
     private var lastTelemetry=""
     private fun applyRequest(){
         val req=builder?:return
+        val lens=lens?:return
+        baseline?.let{settings.applyTo(req,it)}
+        req.set(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION,exposureIndex)
         if(lens.physical==null && lens.zoomMax>lens.zoomMin)req.set(CaptureRequest.CONTROL_ZOOM_RATIO,zoom)
         session?.setRepeatingRequest(req.build(),object:CameraCaptureSession.CaptureCallback(){
             override fun onCaptureCompleted(s:CameraCaptureSession,r:CaptureRequest,result:TotalCaptureResult){
@@ -168,14 +199,19 @@ class Capture(private val ctx:Context, private val preview:Surface, private val 
             if(stopping.get())return@post
             synchronized(cameraLock){
                 revision++;session?.close();session=null;camera?.close();camera=null;builder=null
-                lens=next;zoom=1f
+                lens=next;compositor?.lens=next;zoom=1f;exposureIndex=0;settings=CameraSettings()
                 try{openCamera()}catch(e:Exception){fail()}
             }
         }
     }
+    fun changeExposure(index:Int){
+        if(camThread.isAlive)Handler(camThread.looper).post{
+            if(!stopping.get())try{exposureIndex=index;applyRequest()}catch(e:Exception){fail()}
+        }
+    }
     fun changeZoom(value:Float){
         if(camThread.isAlive)Handler(camThread.looper).post{
-            if(!stopping.get())try{zoom=value.coerceIn(lens.zoomMin,lens.zoomMax);applyRequest()}catch(e:Exception){fail()}
+            if(!stopping.get())try{val l=lens?:return@post;zoom=value.coerceIn(l.zoomMin,l.zoomMax);applyRequest()}catch(e:Exception){fail()}
         }
     }
     private fun feedMicrophone(){
@@ -186,6 +222,7 @@ class Capture(private val ctx:Context, private val preview:Surface, private val 
         b.clear()
         val n=mic!!.read(b,minOf(2048,b.capacity()),AudioRecord.READ_BLOCKING)
         require(n>=0)
+        if(microphoneMuted.get())silencePcm(b,n)
         c.queueInputBuffer(i,0,n,audioOrigin+samples*1000000/48000,0)
         samples+=n/2
     }
@@ -202,7 +239,18 @@ class Capture(private val ctx:Context, private val preview:Surface, private val 
                     if(!a && videoOrigin<0)videoOrigin=info.presentationTimeUs-(System.nanoTime()-startNs)/1000
                     val pts=(if(a)info.presentationTimeUs else info.presentationTimeUs-videoOrigin).coerceAtLeast(0)
                     val frame=Frame(a,pts,info.flags,bytes)
-                    if(mux!=null && !muxStarted){require(pending.size<160);pending.add(frame)}else write(frame)
+                    if(mux!=null){
+                        if(muxStarted)writeRecording(frame)
+                        else{require(pending.size<160);pending.add(frame)}
+                    }
+                    if(client!=null && !stopping.get())writeNetwork(frame)
+                    if(!stopping.get()){
+                        delivered[if(a)1 else 0]=true
+                        if(!published && delivered.all{it} && (mux==null || recorded.all{it})){
+                            published=true
+                            notify(if(client!=null)1 else 2)
+                        }
+                    }
                 }
             }finally{c.releaseOutputBuffer(i,false)}
         }
@@ -210,22 +258,29 @@ class Capture(private val ctx:Context, private val preview:Surface, private val 
     private fun format(a:Boolean,f:MediaFormat){
         if(mux!=null){
             tracks[if(a)1 else 0]=mux!!.addTrack(f)
-            if(tracks.all{it>=0}){mux!!.start();muxStarted=true;pending.forEach(::write);pending.clear()}
-        }else{
+            if(tracks.all{it>=0}){mux!!.start();muxStarted=true;pending.forEach(::writeRecording);pending.clear()}
+        }
+        if(client!=null && !stopping.get()){
             fun csd(n:Int):ByteArray{val b=f.getByteBuffer("csd-"+n)!!.duplicate();return ByteArray(b.remaining()).also{b.get(it)}}
-            if(a)client!!.media(8,0,byteArrayOf(0xaf.toByte(),0)+csd(0))
-            else client!!.media(9,0,Avc.config(Avc.units(csd(0))+Avc.units(csd(1))))
+            val type=if(a)8 else 9
+            val config=if(a)byteArrayOf(0xaf.toByte(),0)+csd(0) else Avc.config(Avc.units(csd(0))+Avc.units(csd(1)))
+            client!!.media(type,0,config);extra.send(type,0,config)
         }
     }
-    private fun write(f:Frame){
-        if(muxStarted){
-            val info=MediaCodec.BufferInfo().apply{set(0,f.bytes.size,f.pts,f.flags)}
-            mux!!.writeSampleData(tracks[if(f.audio)1 else 0],ByteBuffer.wrap(f.bytes),info)
-        }else{
+    private fun writeRecording(f:Frame){
+        val index=if(f.audio)1 else 0
+        val info=MediaCodec.BufferInfo().apply{set(0,f.bytes.size,f.pts,f.flags)}
+        try{
+            mux!!.writeSampleData(tracks[index],ByteBuffer.wrap(f.bytes),info)
+            recorded[index]=true
+        }catch(e:Exception){recordingFailed=true;throw e}
+    }
+    private fun writeNetwork(f:Frame){
             val packet=if(f.audio)byteArrayOf(0xaf.toByte(),1)+f.bytes else Avc.frame(f.bytes,f.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME!=0)
             val now=System.nanoTime()
             try{client!!.media(if(f.audio)8 else 9,(f.pts/1000).toInt(),packet)}
             catch(e:Exception){onlineFailure=!stopping.get();throw e}
+            extra.send(if(f.audio)8 else 9,(f.pts/1000).toInt(),packet)
             writeTime+=System.nanoTime()-now
             if(probeStart==0L)probeStart=now
             val elapsed=now-probeStart
@@ -243,9 +298,5 @@ class Capture(private val ctx:Context, private val preview:Surface, private val 
                 }
                 writeTime=0;probeStart=now
             }
-        }
-        delivered[if(f.audio)1 else 0]=true
-        if(!published && delivered.all{it}){published=true;notify(if(file==null)1 else 2)}
     }
 }
-
