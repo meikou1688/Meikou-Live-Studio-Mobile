@@ -11,6 +11,7 @@ import java.net.URI
 import java.nio.ByteBuffer
 import java.util.concurrent.*
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.concurrent.thread
 
 data class Profile(val width:Int,val height:Int,val fps:Int,val bitrate:Int,val hevc:Boolean)
@@ -48,6 +49,12 @@ class Capture(private val ctx:Context, private val preview:Surface?, private val
     @Synchronized fun monitorSurface(surface:Surface?){monitor=surface;compositor?.monitorSurface(surface)}
     private var mux:MediaMuxer?=null
     val microphoneMuted=AtomicBoolean()
+    private val microphoneLevel=AtomicInteger(100)
+    private val playbackLevel=AtomicInteger(100)
+    fun setAudioLevels(microphone:Int,playback:Int){
+        microphoneLevel.set(microphone.coerceIn(0,200))
+        playbackLevel.set(playback.coerceIn(0,200))
+    }
     private val recorded=BooleanArray(2)
     private var recordingFailed=false
     private var muxStarted=false
@@ -303,10 +310,11 @@ class Capture(private val ctx:Context, private val preview:Surface?, private val
                 if(nextUs-capturedUs>65000)continue
                 if(nextUs==0L || capturedUs-nextUs>65000)nextUs=capturedUs
                 if(microphoneMuted.get())silencePcm(buffer,n)
+                scalePcm(buffer,n,microphoneLevel.get())
                 playback?.let{
                     playbackBuffer.clear()
                     val read=it.read(playbackBuffer,n,AudioRecord.READ_NON_BLOCKING)
-                    check(read>=0);mixPcm(buffer,playbackBuffer,read)
+                    check(read>=0);mixPcm(buffer,playbackBuffer,read,playbackLevel.get())
                 }
                 music.mix(scenes.active.layers.lastOrNull{it.kind=="music"},buffer,n)
                 val bytes=ByteArray(n)

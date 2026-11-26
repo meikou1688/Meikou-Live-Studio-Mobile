@@ -115,6 +115,28 @@ class Studio:Activity(){
     private lateinit var saveLive:CheckBox
     private lateinit var mute:Switch
     private lateinit var inputs:Spinner
+    private var microphoneLevel=100
+    private var playbackLevel=100
+    private fun audioMixer(){
+        val form=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(20),0,dp(20),dp(8))}
+        fun control(title:String,initial:Int,changed:(Int)->Unit){
+            val value=TextView(this).apply{text=getString(resources.getIdentifier("audio_level_value","string",packageName),title,initial)}
+            val slider=SeekBar(this).apply{max=200;progress=initial}
+            slider.setOnSeekBarChangeListener(object:SeekBar.OnSeekBarChangeListener{
+                override fun onProgressChanged(bar:SeekBar,level:Int,fromUser:Boolean){
+                    value.text=getString(resources.getIdentifier("audio_level_value","string",packageName),title,level)
+                    if(fromUser)changed(level)
+                }
+                override fun onStartTrackingTouch(bar:SeekBar){}
+                override fun onStopTrackingTouch(bar:SeekBar){}
+            })
+            form.addView(value);form.addView(slider)
+        }
+        fun apply(){capture?.setAudioLevels(microphoneLevel,playbackLevel);ScreenService.setAudioLevels(microphoneLevel,playbackLevel)}
+        control(ui("microphone_level"),microphoneLevel){microphoneLevel=it;apply()}
+        control(ui("playback_level"),playbackLevel){playbackLevel=it;apply()}
+        AlertDialog.Builder(this).setTitle(ui("audio_mixer")).setView(form).setPositiveButton(ui("close"),null).show()
+    }
     private val handlers=Handler(Looper.getMainLooper())
     private var attempts=0
     private var waiting=false
@@ -279,7 +301,7 @@ class Studio:Activity(){
         options(bits,listOf(2,4,6,8,12));bits.setSelection(1)
         mute=Switch(this).apply{
             text=ui("mute_mic")
-            setOnCheckedChangeListener{_,enabled->capture?.microphoneMuted?.set(enabled)}
+            setOnCheckedChangeListener{_,enabled->capture?.microphoneMuted?.set(enabled);ScreenService.setMicrophoneMuted(enabled)}
         }
         panel.addView(mute)
         if(android.media.audiofx.NoiseSuppressor.isAvailable()){
@@ -290,6 +312,7 @@ class Studio:Activity(){
         val sound=getSystemService(AUDIO_SERVICE) as AudioManager
         devices=sound.getDevices(AudioManager.GET_DEVICES_INPUTS).toList()
         options(inputs,listOf(ui("system_default"))+devices.map{it.productName.toString()+" · "+it.id})
+        button(ui("audio_mixer")){audioMixer()}
         codecs=spinner(ui("codec"));options(codecs,listOf("H.264","H.265（SRT 或錄影）"))
         button("專業相機"){professional()}
         button(ui("ev")){selectExposure()}
@@ -552,6 +575,7 @@ class Studio:Activity(){
         reduceNoise?.isEnabled=false
         session.reduceNoise=reduceNoise?.isChecked==true
         session.microphoneMuted.set(mute.isChecked)
+        session.setAudioLevels(microphoneLevel,playbackLevel)
         backgroundLive.isEnabled=false
         backgroundActive=stream && backgroundLive.isChecked
         if(!backgroundActive){session.start();return}
@@ -584,6 +608,8 @@ class Studio:Activity(){
                 putExtra("w",if(portrait)size.height else size.width);putExtra("h",if(portrait)size.width else size.height)
                 putExtra("fps",rates.selectedItem as? Int ?:30);putExtra("bitrate",((bits.selectedItem as? Int)?:4)*1000000)
                 putExtra("target",url?.toString());putExtra("record",saveLive.isChecked);putExtra("muted",mute.isChecked)
+                putExtra("noise",reduceNoise?.isChecked==true)
+                putExtra("microphoneLevel",microphoneLevel);putExtra("playbackLevel",playbackLevel)
                 putExtra("input",devices.getOrNull(inputs.selectedItemPosition-1)?.id?:-1)
                 putStringArrayListExtra("additional",ArrayList(if(stream)additional.map{it.toString()} else emptyList()))
             }

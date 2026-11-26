@@ -14,8 +14,11 @@ class ScreenService:Service(){
     companion object{
         @Volatile var running=false
             private set
+        @Volatile private var instance:ScreenService?=null
         const val CHANNEL="screen_broadcast"
         const val STOP="tw.meikou.live.STOP_SCREEN"
+        fun setMicrophoneMuted(muted:Boolean){instance?.current?.microphoneMuted?.set(muted)}
+        fun setAudioLevels(microphone:Int,playback:Int){instance?.current?.setAudioLevels(microphone,playback)}
     }
     private var current:Capture?=null
     private val main=Handler(Looper.getMainLooper())
@@ -43,17 +46,24 @@ class ScreenService:Service(){
             val urls=intent.getStringArrayListExtra("additional").orEmpty().map(::URI)
             val input=(getSystemService(AUDIO_SERVICE) as AudioManager).getDevices(AudioManager.GET_DEVICES_INPUTS).firstOrNull{it.id==intent.getIntExtra("input",-1)}
             running=true
+            instance=this
             current=Capture(this,null,profile,Scenes(this),null,input,1f,0,CameraSettings(),{},target,urls,{_,_->},file,
                 {mode->main.post{notices.notify(11,notice(when(mode){1->"正在傳送螢幕與麥克風";3->"網路中斷，正在重新連線";else->"正在錄製螢幕與麥克風"}))}},
                 {ok,_,recorded->
                     val saved=if(recorded && file!=null)saveMovie(file) else null
                     main.post{
                         android.widget.Toast.makeText(this,saved?.let{"已儲存 "+it}?:if(ok)"已結束螢幕分享" else "螢幕擷取或網路傳輸未完成",android.widget.Toast.LENGTH_LONG).show()
-                        current=null;running=false;stopForeground(STOP_FOREGROUND_REMOVE);stopSelf()
+                        current=null;running=false;if(instance===this)instance=null;stopForeground(STOP_FOREGROUND_REMOVE);stopSelf()
                     }
-                },projection).also{it.mixPlayback=intent.getBooleanExtra("playback",false);it.microphoneMuted.set(intent.getBooleanExtra("muted",false));it.start()}
-        }catch(e:Exception){running=false;current?.stop();stopForeground(STOP_FOREGROUND_REMOVE);stopSelf();android.widget.Toast.makeText(this,"無法啟動螢幕分享，請確認系統授權",android.widget.Toast.LENGTH_LONG).show()}
+                },projection).also{
+                    it.mixPlayback=intent.getBooleanExtra("playback",false)
+                    it.reduceNoise=intent.getBooleanExtra("noise",false)
+                    it.microphoneMuted.set(intent.getBooleanExtra("muted",false))
+                    it.setAudioLevels(intent.getIntExtra("microphoneLevel",100),intent.getIntExtra("playbackLevel",100))
+                    it.start()
+                }
+        }catch(e:Exception){running=false;if(instance===this)instance=null;current?.stop();stopForeground(STOP_FOREGROUND_REMOVE);stopSelf();android.widget.Toast.makeText(this,"無法啟動螢幕分享，請確認系統授權",android.widget.Toast.LENGTH_LONG).show()}
         return START_NOT_STICKY
     }
-    override fun onDestroy(){current?.stop();running=false;super.onDestroy()}
+    override fun onDestroy(){current?.stop();running=false;if(instance===this)instance=null;super.onDestroy()}
 }
