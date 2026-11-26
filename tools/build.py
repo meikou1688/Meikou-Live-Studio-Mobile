@@ -1,4 +1,4 @@
-"""Windows offline build with an installed Android SDK 36, Gradle 8.13 and JDK 17."""
+"""Build with Android SDK 36, Gradle 8.13, JDK 17 and Google Maven dependencies."""
 from pathlib import Path
 import os, subprocess, zipfile, shutil
 root=Path(__file__).resolve().parents[1]
@@ -21,6 +21,7 @@ def build():
     env["ANDROID_HOME"]=str(sdk)
     run(launcher,"-p",root,":app:assembleDebug","--console=plain")
     apk=out/"Meikou-Live-Mobile-0.1.3.apk"
-    shutil.copyfile(root/"app/build/outputs/apk/debug/app-debug.apk",apk)
+    from sign_test_apk import sign_test_apk
+    sign_test_apk(root/"app/build/outputs/apk/debug/app-debug.apk",apk)
     run(java,"-jar",bt/"lib/apksigner.jar","verify","--verbose",apk)
 if __name__=="__main__":build()

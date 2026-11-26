@@ -5,6 +5,10 @@ plugins {
 android {
     namespace = "tw.meikou.live"
     compileSdk = 36
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
     defaultConfig {
         applicationId = "tw.meikou.live"
         minSdk = 30
