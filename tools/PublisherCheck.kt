@@ -7,7 +7,8 @@ fun main(args:Array<String>){
     val file=DataInputStream(File(args[1]).inputStream().buffered())
     fun u24()=(file.readUnsignedByte() shl 16) or (file.readUnsignedByte() shl 8) or file.readUnsignedByte()
     file.skipBytes(9)
-    Rtmp(URI(args[0])).use{sender->
+    val target=if(args.size==3)streamDestination(args[0],args[2]) else URI(args[0])
+    Rtmp(target).use{sender->
         if(args[0]=="pipe")sender.publishOverStreams(System.`in`,System.out) else sender.connect()
         while(file.available()>4){
             file.readInt()

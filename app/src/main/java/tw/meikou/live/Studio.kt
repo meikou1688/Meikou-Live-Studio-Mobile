@@ -302,21 +302,29 @@ class Studio:Activity(){
         val photo=button(ui("photo")){}
         photo.setOnClickListener{savePreviewPhoto(photo)}
         button(ui("diagnostics")){hardware()}
-        val transport=LinearLayout(this).apply{gravity=Gravity.CENTER_VERTICAL}
+        val transport=LinearLayout(this).apply{gravity=Gravity.CENTER}
         page.addView(transport,-1,dp(46))
         fun quick(title:String,run:()->Unit){
-            transport.addView(Button(this).apply{text=title;textSize=13f;minWidth=0;setPadding(0,0,0,0);setOnClickListener{run()}},LinearLayout.LayoutParams(0,-1,1f))
+            transport.addView(Button(this).apply{text=title;textSize=13f;minWidth=0;setPadding(0,0,0,0);setOnClickListener{run()}},LinearLayout.LayoutParams(dp(72),dp(44)))
         }
-        quick("鏡頭"){
-            val entries=(0 until lenses.count).map{lenses.getItemAtPosition(it) as Lens}
-            if(entries.isNotEmpty())choose("選擇鏡頭",entries.map{it.toString()}){lenses.setSelection(it)}
+        quick("工具"){
+            settingsOpen(false)
+            choose("直播工具",listOf("切換鏡頭","素材圖層","選擇場景","直播設定")){index->
+                when(index){
+                    0->{
+                        val entries=(0 until lenses.count).map{lenses.getItemAtPosition(it) as Lens}
+                        if(entries.isNotEmpty())choose("選擇鏡頭",entries.map{it.toString()}){lenses.setSelection(it)}
+                    }
+                    1->sceneEditor.edit()
+                    2->sceneEditor.chooseScene()
+                    3->settingsOpen(true)
+                }
+            }
         }
-        quick("素材"){sceneEditor.edit()}
-        quick("設定"){settingsOpen(controls.visibility!=View.VISIBLE)}
         for(action in listOf(live,record)){
             panel.removeView(action);action.textSize=13f;action.minWidth=0;action.setPadding(0,0,0,0)
             action.background=box(if(action==live)"#d7263d" else "#3a3e4c")
-            transport.addView(action,LinearLayout.LayoutParams(0,-1,1f))
+            transport.addView(action,LinearLayout.LayoutParams(dp(92),dp(44)))
         }
         panel.removeView(status)
         bar.addView(status,1,LinearLayout.LayoutParams(0,-2,2f))
