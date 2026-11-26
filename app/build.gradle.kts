@@ -9,7 +9,9 @@ android {
         applicationId = "tw.meikou.live"
         minSdk = 30
         targetSdk = 35
-        versionCode = 3
-        versionName = "0.1.2"
+        versionCode = 4
+        versionName = "0.1.3"
     }
 }
+
+dependencies { implementation("com.google.android.gms:play-services-auth:21.4.0") }

@@ -29,3 +29,9 @@
 Google Auth Platform 已在專案 `meikou-live-studio-mobile` 建立 Android OAuth 用戶端，套件名稱為 `tw.meikou.live`，使用 0.1.2 測試 APK 的簽章。控制台顯示一位測試使用者。換用其他簽署金鑰時，需要登記對應的憑證指紋。個人帳號及授權權杖不收錄於儲存庫。
 
 公開測試檔位於 `releases/v0.1.2/Meikou-Live-Mobile-0.1.2.apk`，SHA-256 為 `2df7cf6a08166ba7319532778634418f3589f57da9715c2fdbe292c322429de2`。此版本以自訂 RTMP 或 RTMPS 網址推流。App 內 YouTube 頻道授權、頻道讀取及 YouTube 接收端驗證仍未完成。
+
+## 0.1.3 開發版
+
+Android 版加入 Google Identity Services 授權流程，使用 youtube.readonly 讀取實際登入的 YouTube 頻道名稱。由使用者在待機時啟動。此步驟不會建立直播或變更頻道內容。需在對應簽章及已安裝 Google Play 服務的手機驗證授權、取消、網路錯誤及頻道名稱。公開的 0.1.2 APK 未包含本功能。
+
+使用 Gradle 8.13、JDK 17 執行 gradle :app:assembleDebug。主要相依套件為 Google Maven 發布的 com.google.android.gms:play-services-auth:21.4.0。建置機的偵錯簽章與實機測試簽章不同時，需重新使用登記的金鑰簽署。GitHub Actions 產物供編譯驗證。

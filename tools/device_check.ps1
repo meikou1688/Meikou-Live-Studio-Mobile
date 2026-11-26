@@ -8,8 +8,8 @@ $argsDevice=@()
 if($DeviceSerial){$argsDevice=@("-s",$DeviceSerial)}
 & $adb @argsDevice get-state
 if($LASTEXITCODE){throw "找不到已授權的 Android 手機。"}
-$apk=Join-Path $root "build/Meikou-Live-Mobile-0.1.2.apk"
-if(!(Test-Path $apk)){$apk=Join-Path $root "Meikou-Live-Mobile-0.1.2.apk"}
+$apk=Join-Path $root "build/Meikou-Live-Mobile-0.1.3.apk"
+if(!(Test-Path $apk)){$apk=Join-Path $root "Meikou-Live-Mobile-0.1.3.apk"}
 & $adb @argsDevice install -r $apk
 if($LASTEXITCODE){throw "APK 安裝失敗。"}
 New-Item -Type Directory -Force "$root/build" | Out-Null

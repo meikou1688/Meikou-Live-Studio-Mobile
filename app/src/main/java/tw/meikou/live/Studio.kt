@@ -62,6 +62,7 @@ class Studio:Activity(){
     private var additional=listOf<URI>()
     private lateinit var outputSummary:TextView
     private val outputStates=sortedMapOf<Int,String>()
+    private val youtube by lazy { YouTubeChannel(this) { status.text=it } }
     private lateinit var editOutputs:Button
     private fun destination(text:String):URI=URI(text.trim()).also{
         require(it.scheme in listOf("rtmp","rtmps") && it.host!=null && it.rawPath.trim('/').contains('/') && !it.rawPath.endsWith('/') && it.userInfo==null && it.fragment==null)
@@ -249,6 +250,10 @@ class Studio:Activity(){
         address.background=box("#20222b","#3a3e4c",4)
         address.setPadding(dp(10),dp(6),dp(10),dp(6));address.textSize=14f
         panel.addView(address)
+        button("連結 YouTube 頻道"){
+            if(capture!=null || waiting || ScreenService.running) status.text="請先結束直播或錄影，再連結 YouTube 頻道。"
+            else youtube.connect()
+        }
         editOutputs=button("管理多路推流"){editDestinations()}
         outputSummary=label("額外目的地：0")
         saveLive=CheckBox(this).apply{text=ui("save_live")}
@@ -408,6 +413,7 @@ class Studio:Activity(){
     }
     override fun onActivityResult(requestCode:Int,resultCode:Int,data:Intent?){
         super.onActivityResult(requestCode,resultCode,data)
+        if(requestCode==YouTubeChannel.REQUEST){youtube.returned(resultCode,data);return}
         if(requestCode==703){
             val session=pendingScreen;pendingScreen=null
             if(resultCode==RESULT_OK && data!=null && session!=null){
