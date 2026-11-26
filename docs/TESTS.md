@@ -29,3 +29,15 @@ Android SDK 36 離線編譯、D8、aapt 與 APK v3 簽章驗證通過。MuteChec
 USB 基準驗收可在一般 Windows 開發環境執行 tools/device_check.ps1，使用 USB 轉接 TCP、私人本機接收器與暫存測試網址，實際安裝 APK 並解碼手機推來的檔案。此項只測 USB 路徑。再用私人 RTMPS 接收端分別測單一 5G 與 Speedify 雙線聚合，於同一場測試中拔除一路、恢復連線及手動停止重連。記錄接收端時間軸、編碼器、音畫差、網路斷線與復原時間。Android 顯示 VPN 僅代表網路路由，仍需 Speedify 的連線統計佐證多卡確實承載流量。
 
 正式現場使用的驗收條件包含三鏡實際視角、外接收音、連續直播、接收端可解碼、長時間影音同步、儲存空間與熱穩定性。此版未取得這些手機端驗收結果。
+
+## 0.1.3 雲端編譯與獨立接收端測試
+
+2026-11-26 GitHub Actions 第 2 次執行成功，執行編號 45848876589。下載的建置壓縮檔 SHA-256 與 GitHub 公布值相符。以登記的本機測試金鑰重新簽署後，apksigner 驗證及 OAuth 憑證指紋核對均通過。
+
+| 路徑 | 接收端解碼 H.264 影格 | 接收端解碼 AAC 音訊框 |
+| --- | ---: | ---: |
+| RTMP 程序管線 | 90 | 142 |
+| App 共用 Kotlin RTMP 傳送程式 → TCP → FFmpeg | 90 | 142 |
+| FFmpeg → SRT/UDP → FFmpeg | 86 | 134 |
+
+測試來源採 FFmpeg 編碼的三秒測試圖與音調。兩種網路傳輸皆在同一台 Linux 主機上透過網路通訊端傳送。SRT 數據僅驗證測試設備與接收端。手機端 SRT、RTMPS 接收、YouTube 授權回傳、VIVO 三實體鏡頭、外接音訊及 Speedify 仍待實測。詳見 releases/v0.1.3/transport-results.json。
