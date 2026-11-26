@@ -68,4 +68,5 @@ jobs:
             build/instrumentation.txt
             build/background*results.json
             build/lane-*.json
+            build/*-timing.json
             build/receiver.log

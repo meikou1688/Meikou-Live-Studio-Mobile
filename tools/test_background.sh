@@ -73,3 +73,4 @@ Path("build/background-results.json").write_text(json.dumps(stats,indent=2))
 print(stats)
 PY
 cp build/background-results.json "build/background-$protocol-results.json"
+python3 tools/check_session_timing.py "$protocol"
