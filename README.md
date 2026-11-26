@@ -1,5 +1,8 @@
 # Meikou Live Studio Mobile
 
+**首版驗收尚未通過。** 0.1.1 為測試 APK。請參閱[首版 Android 功能對照與驗收紀錄](docs/ANDROID-V1-PARITY.md)。
+
+
 Android 11 以上的獨立行動直播技術驗證版。此次交付使用偵錯簽章。解壓版本備份即可取得 APK、完整原始碼與測試紀錄。
 
 ## 手機操作
