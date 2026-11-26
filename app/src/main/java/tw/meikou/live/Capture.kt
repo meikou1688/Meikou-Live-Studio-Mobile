@@ -57,8 +57,10 @@ class Capture(private val ctx:Context, private val preview:Surface?, private val
     private var writeTime=0L
     private var stableWindows=0
     private var startNs=0L
-    private var audioOrigin=0L
-    private var samples=0L
+    private data class PcmBlock(val samples:ByteArray,val pts:Long)
+    private val pcmQueue=ArrayBlockingQueue<PcmBlock>(64)
+    private var microphoneThread:Thread?=null
+    private var endAudioUs=0L
     private val delivered=BooleanArray(2)
     private val cameraReady=CountDownLatch(1)
     private val cameraLock=Any()
@@ -87,8 +89,8 @@ class Capture(private val ctx:Context, private val preview:Surface?, private val
                     playback?.let{it.startRecording();check(it.recordingState==AudioRecord.RECORDSTATE_RECORDING)}
                     mic!!.startRecording()
                     check(mic!!.recordingState==AudioRecord.RECORDSTATE_RECORDING)
-                    audioOrigin=(System.nanoTime()-startNs)/1000
                     compositor!!.captureEpochNs=startNs
+                    microphoneThread=thread(name="Microphone"){readMicrophone()}
                     while(!stopping.get()){feedMicrophone();drain(video!!,false);drain(audio!!,true)}
                 }
             }
@@ -99,12 +101,14 @@ class Capture(private val ctx:Context, private val preview:Surface?, private val
             runCatching{virtualDisplay?.release()}
             runCatching{projection?.unregisterCallback(projectionCallback)}
             runCatching{projection?.stop()}
+            runCatching{mic?.stop()}
+            runCatching{microphoneThread?.join(2000)}
             runCatching{compositor?.close()}
             runCatching{playback?.stop()};runCatching{playback?.release()}
-            runCatching{suppressor?.release()};runCatching{mic?.stop()};runCatching{mic?.release()}
+            runCatching{suppressor?.release()};runCatching{mic?.release()}
             if(muxStarted && !recordingFailed){
                 runCatching{video!!.signalEndOfInputStream();val id=audio!!.dequeueInputBuffer(20000)
-                    if(id>=0)audio!!.queueInputBuffer(id,0,0,audioOrigin+samples*1000000/48000,MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                    if(id>=0)audio!!.queueInputBuffer(id,0,0,endAudioUs,MediaCodec.BUFFER_FLAG_END_OF_STREAM)
                     repeat(12){drain(video!!,false);drain(audio!!,true);Thread.sleep(5)}
                 }.onFailure{bad.set(true)}
             }
@@ -253,23 +257,45 @@ class Capture(private val ctx:Context, private val preview:Surface?, private val
             if(!stopping.get())try{val l=lens?:return@post;zoom=value.coerceIn(l.zoomMin,l.zoomMax);applyRequest()}catch(e:Exception){fail()}
         }
     }
+    private fun readMicrophone(){
+        val buffer=ByteBuffer.allocateDirect(2048)
+        var nextUs=0L
+        try{
+            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_AUDIO)
+            while(!stopping.get()){
+                buffer.clear()
+                val n=mic!!.read(buffer,buffer.capacity(),AudioRecord.READ_BLOCKING)
+                require(n>=0 && n%2==0)
+                if(n==0)continue
+                val duration=n.toLong()*1000000/(2*48000)
+                val capturedUs=((System.nanoTime()-startNs)/1000-duration).coerceAtLeast(0)
+                // Preserve source gaps if the device delivers fewer samples than real time.
+                // Small scheduling fluctuations stay on the continuous PCM sample clock.
+                if(nextUs==0L || capturedUs-nextUs>65000)nextUs=capturedUs
+                if(microphoneMuted.get())silencePcm(buffer,n)
+                playback?.let{
+                    playbackBuffer.clear()
+                    val read=it.read(playbackBuffer,n,AudioRecord.READ_NON_BLOCKING)
+                    check(read>=0);mixPcm(buffer,playbackBuffer,read)
+                }
+                val bytes=ByteArray(n)
+                buffer.position(0);buffer.get(bytes)
+                val block=PcmBlock(bytes,nextUs)
+                if(!pcmQueue.offer(block)){pcmQueue.poll();pcmQueue.offer(block)}
+                nextUs+=duration
+            }
+        }catch(e:Exception){if(!stopping.get())fail()}
+    }
     private fun feedMicrophone(){
-        val c=audio!!
-        val i=c.dequeueInputBuffer(1000)
-        if(i<0)return
-        val b=c.getInputBuffer(i)!!
-        b.clear()
-        val n=mic!!.read(b,minOf(2048,b.capacity()),AudioRecord.READ_BLOCKING)
-        require(n>=0)
-        if(microphoneMuted.get())silencePcm(b,n)
-        playback?.let{
-            playbackBuffer.clear()
-            val read=it.read(playbackBuffer,n,AudioRecord.READ_NON_BLOCKING)
-            check(read>=0)
-            mixPcm(b,playbackBuffer,read)
-        }
-        c.queueInputBuffer(i,0,n,audioOrigin+samples*1000000/48000,0)
-        samples+=n/2
+        if(pcmQueue.isEmpty()){Thread.sleep(1);return}
+        val codec=audio!!
+        val index=codec.dequeueInputBuffer(1000)
+        if(index<0)return
+        val block=pcmQueue.poll()?:error("PCM queue")
+        val buffer=codec.getInputBuffer(index)!!
+        buffer.clear();buffer.put(block.samples)
+        codec.queueInputBuffer(index,0,block.samples.size,block.pts,0)
+        endAudioUs=block.pts+block.samples.size.toLong()*1000000/(2*48000)
     }
     private fun drain(c:MediaCodec,a:Boolean){
         val info=MediaCodec.BufferInfo()
