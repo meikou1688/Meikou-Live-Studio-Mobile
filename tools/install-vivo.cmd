@@ -3,7 +3,7 @@ setlocal
 chcp 65001 >nul
 set "ADB=%ANDROID_HOME%\platform-tools\adb.exe"
 if not exist "%ADB%" set "ADB=%USERPROFILE%\.codex\android-tools\sdk\platform-tools\adb.exe"
-set "APK=%~dp0..\releases\v0.1.5\Meikou-Live-Mobile-0.1.5.apk"
+set "APK=%~dp0..\releases\v0.1.6\Meikou-Live-Mobile-0.1.6.apk"
 if not exist "%ADB%" goto error
 if not exist "%APK%" goto error
 echo 請解鎖 VIVO，若手機詢問是否允許 USB 偵錯，請點允許。

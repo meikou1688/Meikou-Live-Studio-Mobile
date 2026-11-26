@@ -43,3 +43,6 @@ Android 版加入 Google Identity Services 授權流程，使用 youtube.readonl
 參考來源：https://guide.prismlive.com/mobile/guides/getting-started-with-prism-mobile
 
 鏡頭與素材觸控須在 VIVO X300 Ultra 實測，另需其他品牌手機確認 Camera2 實體鏡頭開放程度。
+
+
+0.1.6 開發候選版將相機輸入尺寸與播出畫布分開。更換鏡頭會重新設定輸入緩衝區。背景直播須在前景明確勾選後開播，切換其他 App 可卸離預覽；離開工作且活動被銷毀會停止。預定直播採唯讀授權，透過 Android 分享選單傳送觀看連結。

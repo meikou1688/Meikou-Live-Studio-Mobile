@@ -23,3 +23,6 @@ https://github.com/JetBrains/kotlin
 https://github.com/pedroSG94/RootEncoder
 https://developer.android.com/media/camera/camera2/multi-camera
 https://developer.android.com/reference/android/media/MediaCodec
+
+
+相機輸入尺寸與編碼解析度分開：Camera2 逐鏡頭列舉 SurfaceTexture 尺寸與影格最短時間，OpenGL ES 等比縮放至播出畫布。背景相機直播由具 camera 與 microphone 類型的前景服務提供通知；畫面卸離只移除 EGL 預覽視窗，保留編碼視窗。

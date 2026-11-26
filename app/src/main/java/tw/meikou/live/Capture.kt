@@ -32,8 +32,12 @@ class Capture(private val ctx:Context, private val preview:Surface?, private val
     private var video:MediaCodec?=null
     private var audio:MediaCodec?=null
     private var mic:AudioRecord?=null
+    var reduceNoise=false
+    private var suppressor:android.media.audiofx.NoiseSuppressor?=null
     private var encoderSurface:Surface?=null
     private var compositor:SceneCompositor?=null
+    private var monitor=preview
+    @Synchronized fun monitorSurface(surface:Surface?){monitor=surface;compositor?.monitorSurface(surface)}
     private var mux:MediaMuxer?=null
     val microphoneMuted=AtomicBoolean()
     private val recorded=BooleanArray(2)
@@ -60,6 +64,7 @@ class Capture(private val ctx:Context, private val preview:Surface?, private val
     fun start()=thread(name="Capture") {
         try {
             camThread.start()
+            if(stopping.get())return@thread
             try { client?.connect() } catch(e:java.io.IOException){onlineFailure=true;throw e}
             if(!stopping.get()){
                 extra.start()
@@ -89,7 +94,7 @@ class Capture(private val ctx:Context, private val preview:Surface?, private val
             runCatching{projection?.unregisterCallback(projectionCallback)}
             runCatching{projection?.stop()}
             runCatching{compositor?.close()}
-            runCatching{mic?.stop()};runCatching{mic?.release()}
+            runCatching{suppressor?.release()};runCatching{mic?.stop()};runCatching{mic?.release()}
             if(muxStarted && !recordingFailed){
                 runCatching{video!!.signalEndOfInputStream();val id=audio!!.dequeueInputBuffer(20000)
                     if(id>=0)audio!!.queueInputBuffer(id,0,0,audioOrigin+samples*1000000/48000,MediaCodec.BUFFER_FLAG_END_OF_STREAM)
@@ -120,7 +125,8 @@ class Capture(private val ctx:Context, private val preview:Surface?, private val
                 runCatching{it.getCapabilitiesForType(mime).isFormatSupported(vf)}.getOrDefault(false)
         }
         video=(chosen?.let{MediaCodec.createByCodecName(it.name)} ?: MediaCodec.createEncoderByType(mime)).also{video=it;it.configure(vf,null,null,MediaCodec.CONFIGURE_FLAG_ENCODE);encoderSurface=it.createInputSurface();it.start()}
-        compositor=SceneCompositor(ctx,profile.width,profile.height,preview,lens,encoderSurface!!,scenes){fail()}
+        val renderer=SceneCompositor(ctx,profile.width,profile.height,null,lens,encoderSurface!!,scenes){fail()}
+        synchronized(this){compositor=renderer;renderer.monitorSurface(monitor)}
         val af=MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_AAC,48000,1).apply{
             setInteger(MediaFormat.KEY_AAC_PROFILE,MediaCodecInfo.CodecProfileLevel.AACObjectLC);setInteger(MediaFormat.KEY_BIT_RATE,96000)}
         audio=MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_AUDIO_AAC).also{audio=it;it.configure(af,null,null,MediaCodec.CONFIGURE_FLAG_ENCODE);it.start()}
@@ -128,6 +134,10 @@ class Capture(private val ctx:Context, private val preview:Surface?, private val
         require(min>0)
         mic=AudioRecord(MediaRecorder.AudioSource.CAMCORDER,48000,AudioFormat.CHANNEL_IN_MONO,AudioFormat.ENCODING_PCM_16BIT,maxOf(min*2,8192))
         check(mic!!.state==AudioRecord.STATE_INITIALIZED)
+        if(reduceNoise){
+            suppressor=android.media.audiofx.NoiseSuppressor.create(mic!!.audioSessionId)
+            check(suppressor?.setEnabled(true)==android.media.audiofx.AudioEffect.SUCCESS && suppressor?.enabled==true)
+        }
         if(inputDevice!=null)check(mic!!.setPreferredDevice(inputDevice))
         file?.let{mux=MediaMuxer(it.absolutePath,MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)}
     }
@@ -203,7 +213,7 @@ class Capture(private val ctx:Context, private val preview:Surface?, private val
             if(stopping.get())return@post
             synchronized(cameraLock){
                   revision++;session?.close();session=null;builder=null
-                lens=next;compositor?.lens=next;zoom=1f;exposureIndex=0;settings=CameraSettings()
+                lens=next;compositor?.changeLens(next);zoom=1f;exposureIndex=0;settings=CameraSettings()
                   val old=camera;camera=null
                   if(old!=null){closingForSwitch=old;old.close()}
                   else if(closingForSwitch==null)try{openCamera()}catch(e:Exception){fail()}

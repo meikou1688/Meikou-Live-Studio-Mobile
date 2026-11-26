@@ -56,6 +56,10 @@ class Studio:Activity(){
     private lateinit var live:Button
     private lateinit var record:Button
     private var capture:Capture?=null
+    private lateinit var backgroundLive:CheckBox
+    private var reduceNoise:CheckBox?=null
+    private var backgroundActive=false
+    private var backgroundPreparing=false
     private var profile:Profile?=null
     private var selected:Lens?=null
     private var ending=false
@@ -121,6 +125,14 @@ class Studio:Activity(){
             menu.add("對焦距離" to {
                 val steps=listOf<Float?>(null,0f,focus/4,focus/2,focus*3/4,focus)
                 choose("對焦距離",steps.map{when(it){null->"自動";0f->"無限遠";else->"約 %.2f 公尺".format(1f/it)}}){applySettings(settings.copy(focus=steps[it]))}
+            })
+        }
+        val stabilization=info[CameraCharacteristics.CONTROL_AVAILABLE_VIDEO_STABILIZATION_MODES] ?: intArrayOf()
+        if(CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_ON in stabilization){
+            menu.add("電子防手震" to {
+                choose("電子防手震",listOf("依系統設定","開啟","關閉")){ index ->
+                    applySettings(settings.copy(stabilization=listOf(null,CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_ON,CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_OFF)[index]))
+                }
             })
         }
         if(wb.isNotEmpty())menu.add("白平衡" to {
@@ -258,6 +270,10 @@ class Studio:Activity(){
             setOnCheckedChangeListener{_,enabled->capture?.microphoneMuted?.set(enabled)}
         }
         panel.addView(mute)
+        if(android.media.audiofx.NoiseSuppressor.isAvailable()){
+            reduceNoise=CheckBox(this).apply{text="麥克風降噪"}
+            panel.addView(reduceNoise)
+        }
         inputs=spinner(ui("input_device"))
         val sound=getSystemService(AUDIO_SERVICE) as AudioManager
         devices=sound.getDevices(AudioManager.GET_DEVICES_INPUTS).toList()
@@ -296,10 +312,16 @@ class Studio:Activity(){
             if(capture!=null || waiting || ScreenService.running) status.text="請先結束直播或錄影，再連結 YouTube 頻道。"
             else youtube.connect()
         }
+        button("YouTube 預定直播與分享"){
+            if(capture==null && !waiting && !ScreenService.running)youtube.connect(true)
+            else status.text="請在開播前查看直播排程"
+        }
         editOutputs=button("管理多路推流"){editDestinations()}
         outputSummary=label("額外目的地：0")
         saveLive=CheckBox(this).apply{text=ui("save_live")}
         panel.addView(saveLive)
+        backgroundLive=CheckBox(this).apply{text="切換其他 App 時繼續相機直播"}
+        panel.addView(backgroundLive)
         live=button(ui("go_live")){begin(true)}
         record=button(ui("record")){begin(false)}
         button("螢幕分享／錄影"){screenMenu()}
@@ -332,28 +354,32 @@ class Studio:Activity(){
         panel.removeView(status)
         bar.addView(status,1,LinearLayout.LayoutParams(0,-2,2f))
         status.maxLines=2;status.gravity=Gravity.CENTER
+        sizes.onItemSelectedListener=object:AdapterView.OnItemSelectedListener{
+            override fun onNothingSelected(v:AdapterView<*>?){}
+            override fun onItemSelected(v:AdapterView<*>?,view:View?,i:Int,id:Long){if(profile==null)refreshRates()}
+        }
         lenses.onItemSelectedListener=object:AdapterView.OnItemSelectedListener{
             override fun onNothingSelected(v:AdapterView<*>?){}
             override fun onItemSelected(v:AdapterView<*>?,view:View?,i:Int,id:Long){
                 val next=lenses.selectedItem as? Lens?:return
                 if(selected==next)return
                 val running=profile
-                if(running!=null && (next.sizes.none{it.width==maxOf(running.width,running.height) && it.height==minOf(running.width,running.height)} || running.fps !in next.rates)){
+                if(running!=null && (next.sizes.none{it.width==maxOf(running.width,running.height) && it.height==minOf(running.width,running.height)} || running.fps !in next.supportedRates[android.util.Size(maxOf(running.width,running.height),minOf(running.width,running.height))].orEmpty())){
                     status.text="這顆鏡頭不支援目前規格，請停止後再更改。";lenses.setSelection((0 until lenses.count).first{lenses.getItemAtPosition(it)==selected});return
                 }
                 selected=next
                 exposureCompensation=0;settings=CameraSettings()
                 if(running==null){options(sizes,next.sizes);sizes.setSelection(next.sizes.indexOfFirst{it.width==1280}.coerceAtLeast(0))
-                    options(rates,next.rates);rates.setSelection(next.rates.indexOf(30).coerceAtLeast(0))}
+                    refreshRates()}
                 zoom.isEnabled=next.zoomMax>next.zoomMin;zoom.progress=(0..100).minByOrNull{kotlin.math.abs(zoomRatio(next,it)-1f)}?:0
                 zoomLabel.text="系統變焦 1.00×"
                 if(capture!=null)capture?.changeLens(next) else stopPreview{previewSelected()}
             }
         }
         preview.holder.addCallback(object:SurfaceHolder.Callback{
-            override fun surfaceCreated(h:SurfaceHolder){ready=true;previewSelected()}
+            override fun surfaceCreated(h:SurfaceHolder){ready=true;capture?.monitorSurface(h.surface);previewSelected()}
             override fun surfaceChanged(h:SurfaceHolder,f:Int,w:Int,t:Int){}
-            override fun surfaceDestroyed(h:SurfaceHolder){ready=false;stopPreview();capture?.stop()}
+            override fun surfaceDestroyed(h:SurfaceHolder){ready=false;stopPreview();if(backgroundActive)capture?.monitorSurface(null) else capture?.stop()}
         })
         network.registerDefaultNetworkCallback(monitor)
         if(granted())loadLenses() else requestPermissions(arrayOf(Manifest.permission.CAMERA,Manifest.permission.RECORD_AUDIO),1)
@@ -370,7 +396,14 @@ class Studio:Activity(){
     private fun button(s:String,f:()->Unit)=Button(this).also{it.text=s;it.textSize=14f;it.setTextColor(android.content.res.ColorStateList(arrayOf(intArrayOf(-android.R.attr.state_enabled),intArrayOf()),intArrayOf(color("#aeb3c0"),Color.WHITE)));it.background=box("#2a2d38","#3a3e4c");panel.addView(it);it.setOnClickListener{f()}}
     private fun <T> options(view:Spinner,items:List<T>){view.adapter=ArrayAdapter(this,android.R.layout.simple_spinner_dropdown_item,items)}
     private fun granted()=listOf(Manifest.permission.CAMERA,Manifest.permission.RECORD_AUDIO).all{checkSelfPermission(it)==PackageManager.PERMISSION_GRANTED}
-    override fun onRequestPermissionsResult(r:Int,p:Array<String>,g:IntArray){super.onRequestPermissionsResult(r,p,g);if(granted())loadLenses()else status.text="請在系統設定允許使用相機與麥克風。"}
+    override fun onRequestPermissionsResult(r:Int,p:Array<String>,g:IntArray){super.onRequestPermissionsResult(r,p,g);if(r==705){status.text=if(g.firstOrNull()==PackageManager.PERMISSION_GRANTED)"已允許通知，可以開始直播" else "背景直播需要通知權限";return};if(granted())loadLenses()else status.text="請在系統設定允許使用相機與麥克風。"}
+    private fun refreshRates(){
+        val size=sizes.selectedItem as? android.util.Size?:return
+        val available=selected?.supportedRates?.get(size).orEmpty()
+        val previous=rates.selectedItem as? Int
+        options(rates,available)
+        if(available.isNotEmpty())rates.setSelection(available.indexOf(previous?.takeIf { it in available }?:30).coerceAtLeast(0))
+    }
     private fun loadLenses(){runCatching{val list=inventory(getSystemService(CAMERA_SERVICE) as CameraManager);options(lenses,list)
         shortcuts.removeAllViews()
         val groups=list.withIndex().filter{!it.value.front && it.value.equivalent!=null}.groupBy{
@@ -413,10 +446,19 @@ class Studio:Activity(){
         val l=selected?:return
         val size=sizes.selectedItem as? android.util.Size?:return
         val fps=rates.selectedItem as? Int?:return
+        if(fps !in l.supportedRates[size].orEmpty()){status.text="此鏡頭無法使用選取的解析度與影格率";return}
         val p=Profile(if(portrait)size.height else size.width,if(portrait)size.width else size.height,fps,(bits.selectedItem as Int)*1000000,codecs.selectedItemPosition==1)
         val uri=if(stream)runCatching{streamDestination(address.text.toString(),streamKey.text.toString())}.getOrNull() else null
         if(stream && (uri==null || p.hevc)){status.text="直播請選用 H.264，並填寫伺服器網址及串流金鑰。";return}
         if(stream && uri in additional){status.text="主要與額外目的地重複";return}
+        if(stream && backgroundLive.isChecked){
+            if(Build.VERSION.SDK_INT>=33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED){
+                requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS),705)
+                status.text="啟用直播通知後，請再按開始直播"
+                return
+            }
+            if(!getSystemService(NotificationManager::class.java).areNotificationsEnabled()){status.text="請先在系統設定開啟直播通知";return}
+        }
         if(finder!=null){stopPreview{begin(stream)};return}
         outputStates.clear()
         val folder=getExternalFilesDir(Environment.DIRECTORY_MOVIES)
@@ -427,13 +469,13 @@ class Studio:Activity(){
         listOf(rotateButton,editOutputs,saveLive,inputs,sizes,rates,bits,codecs,address,streamKey).forEach{it.isEnabled=false}
         live.isEnabled=stream;record.isEnabled=!stream
         if(stream)live.text=ui("stop_live") else record.text=ui("stop_record")
-        capture=Capture(this,preview.holder.surface,p,scenes,l,devices.getOrNull(inputs.selectedItemPosition-1),zoomRatio(l,zoom.progress),exposureCompensation,settings,{s->runOnUiThread{reading.text=s}},uri,if(stream)additional else emptyList(),{index,value->runOnUiThread{
+        val session=Capture(this,preview.holder.surface,p,scenes,l,devices.getOrNull(inputs.selectedItemPosition-1),zoomRatio(l,zoom.progress),exposureCompensation,settings,{s->runOnUiThread{reading.text=s}},uri,if(stream)additional else emptyList(),{index,value->runOnUiThread{
             outputStates[index]=value;outputSummary.text=outputStates.entries.joinToString("  "){"目的地 "+it.key+"："+it.value}
         }},file,
-            {mode->runOnUiThread{if(!ending){monitorState(mode==1);status.text=when{mode!=1->"錄影中";file!=null->"直播中 · 同步錄影中";else->"直播中 · 已送出影音"}}}},
+            {mode->runOnUiThread{if(!ending){if(backgroundActive && mode==1)CameraLiveService.update("相機直播中，可點選停止直播");monitorState(mode==1);status.text=when{mode!=1->"錄影中";file!=null->"直播中 · 同步錄影中";else->"直播中 · 已送出影音"}}}},
             {ok,networkError,recorded->
                 val saved=if(recorded && file!=null)saveMovie(file) else null
-                runOnUiThread{capture=null;profile=null;monitorState(false)
+                runOnUiThread{if(backgroundActive){CameraLiveService.finish();backgroundActive=false};backgroundLive.isEnabled=true;reduceNoise?.isEnabled=true;capture=null;profile=null;monitorState(false)
                 listOf(rotateButton,editOutputs,saveLive,inputs,sizes,rates,bits,codecs,address,streamKey,live,record).forEach{it.isEnabled=true}
                 live.text=ui("go_live");record.text=ui("record");reading.text="已停止擷取"
                 status.text=when{
@@ -448,7 +490,28 @@ class Studio:Activity(){
                     live.text="取消重新連線"
                     handlers.postDelayed({waiting=false;if(visible && capture==null)begin(true)},delay)
                 }else{attempts=0;previewSelected()}
-            }}).also{it.microphoneMuted.set(mute.isChecked);it.start()}
+            }})
+        capture=session
+        reduceNoise?.isEnabled=false
+        session.reduceNoise=reduceNoise?.isChecked==true
+        session.microphoneMuted.set(mute.isChecked)
+        backgroundLive.isEnabled=false
+        backgroundActive=stream && backgroundLive.isChecked
+        if(!backgroundActive){session.start();return}
+        backgroundPreparing=true
+        fun cancel(){
+            ending=true;session.stop()
+            if(backgroundPreparing){backgroundPreparing=false;CameraLiveService.pendingStart=null;session.start()}
+        }
+        CameraLiveService.pendingStart={
+            backgroundPreparing=false
+            if(!visible || ending)session.stop()
+            session.start()
+        }
+        CameraLiveService.stopSession={cancel()}
+        CameraLiveService.startFailed={cancel();status.text="無法啟用背景直播，請檢查通知與相機權限"}
+        try{startForegroundService(Intent(this,CameraLiveService::class.java))}
+        catch(e:RuntimeException){CameraLiveService.startFailed?.invoke()}
     }
     private var pendingScreen:Intent?=null
     private fun screenMenu(){
@@ -518,7 +581,7 @@ class Studio:Activity(){
         }catch(e:Exception){bitmap.recycle();button.isEnabled=true;Toast.makeText(this,ui("photo_unavailable"),Toast.LENGTH_SHORT).show()}
     }
     private val handlersForPhotos=Handler(Looper.getMainLooper())
-    override fun onStop(){super.onStop();visible=false;stopPreview();cancelRetry();ending=true;capture?.stop()}
-    override fun onDestroy(){network.unregisterNetworkCallback(monitor);super.onDestroy()}
+    override fun onStop(){super.onStop();visible=false;stopPreview();cancelRetry();if(!backgroundActive){ending=true;capture?.stop()}else if(backgroundPreparing)CameraLiveService.stopSession?.invoke()}
+    override fun onDestroy(){if(backgroundActive)CameraLiveService.stopSession?.invoke();network.unregisterNetworkCallback(monitor);super.onDestroy()}
 }
 

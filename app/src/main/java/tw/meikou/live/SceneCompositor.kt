@@ -19,6 +19,7 @@ class SceneCompositor(private val ctx:android.content.Context,private val width:
     private var display=EGL14.EGL_NO_DISPLAY
     private var context=EGL14.EGL_NO_CONTEXT
     private var previewWindow=EGL14.EGL_NO_SURFACE
+    private var windowConfig:EGLConfig?=null
     private var encodeWindow=EGL14.EGL_NO_SURFACE
     private var cameraProgram=0
     private var layerProgram=0
@@ -27,6 +28,12 @@ class SceneCompositor(private val ctx:android.content.Context,private val width:
     lateinit var input:Surface
         private set
     @Volatile var lens=initialLens
+        private set
+    fun changeLens(next:Lens)=onWorker {
+        val size=next.sourceFor(width,height)
+        source.setDefaultBufferSize(size.width,size.height)
+        lens=next
+    }
     private val cameraTransform=FloatArray(16)
     private val viewTransform=FloatArray(16)
     private val matrix=FloatArray(16)
@@ -99,6 +106,7 @@ class SceneCompositor(private val ctx:android.content.Context,private val width:
         attrs.add(EGL14.EGL_NONE)
         val configs=arrayOfNulls<EGLConfig>(1)
         check(EGL14.eglChooseConfig(display,attrs.toIntArray(),0,configs,0,1,v,0) && v[0]>0)
+        windowConfig=configs[0]
         context=EGL14.eglCreateContext(display,configs[0],EGL14.EGL_NO_CONTEXT,intArrayOf(EGL14.EGL_CONTEXT_CLIENT_VERSION,2,EGL14.EGL_NONE),0)
         fun window(surface:Surface)=EGL14.eglCreateWindowSurface(display,configs[0],surface,intArrayOf(EGL14.EGL_NONE),0).also{check(it!=EGL14.EGL_NO_SURFACE)}
         if(monitor!=null)previewWindow=window(monitor)
@@ -109,7 +117,7 @@ class SceneCompositor(private val ctx:android.content.Context,private val width:
         cameraProgram=program("#extension GL_OES_EGL_image_external : require\nprecision mediump float; uniform samplerExternalOES image;"+sample)
         layerProgram=program("precision mediump float; uniform sampler2D image;"+sample)
         cameraTex=texture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES)
-        source=SurfaceTexture(cameraTex);if(lens==null)source.setDefaultBufferSize(width,height) else source.setDefaultBufferSize(maxOf(width,height),minOf(width,height));input=Surface(source)
+        source=SurfaceTexture(cameraTex);val captureSize=lens?.sourceFor(width,height);source.setDefaultBufferSize(captureSize?.width?:width,captureSize?.height?:height);input=Surface(source)
         source.setOnFrameAvailableListener({if(!closing)try{render()}catch(e:Exception){if(!closing)failed()}},handler)
     }
     private fun sprite(v:Overlay):Sprite?{
@@ -171,8 +179,9 @@ class SceneCompositor(private val ctx:android.content.Context,private val width:
             if(windowSize[0]<=0 || windowSize[1]<=0)return
             CameraGeometry.fit(width,height,windowSize[0],windowSize[1],canvasViewport)
             val landscapeInput=selected!=null && rotation%180==0
-            val inputW=if(selected==null)width else if(landscapeInput)maxOf(width,height) else minOf(width,height)
-            val inputH=if(selected==null)height else if(landscapeInput)minOf(width,height) else maxOf(width,height)
+            val captureSize=selected?.sourceFor(width,height)
+            val inputW=if(captureSize==null)width else if(landscapeInput)captureSize.width else captureSize.height
+            val inputH=if(captureSize==null)height else if(landscapeInput)captureSize.height else captureSize.width
             CameraGeometry.fit(inputW,inputH,canvasViewport[2],canvasViewport[3],cameraViewport)
             glClearColor(0f,0f,0f,1f);glClear(GL_COLOR_BUFFER_BIT)
             glViewport(canvasViewport[0]+cameraViewport[0],canvasViewport[1]+cameraViewport[1],cameraViewport[2],cameraViewport[3])
@@ -199,7 +208,23 @@ class SceneCompositor(private val ctx:android.content.Context,private val width:
             if(frames!=null)scenes.previewLayers=frames
         }
         if(encodeWindow!=EGL14.EGL_NO_SURFACE)output(encodeWindow,true)
-        if(previewWindow!=EGL14.EGL_NO_SURFACE)output(previewWindow,false)
+        if(previewWindow!=EGL14.EGL_NO_SURFACE){
+            if(encoder==null)output(previewWindow,false)
+            else try{output(previewWindow,false)}catch(e:IllegalStateException){
+                EGL14.eglMakeCurrent(display,encodeWindow,encodeWindow,context)
+                EGL14.eglDestroySurface(display,previewWindow)
+                previewWindow=EGL14.EGL_NO_SURFACE
+            }
+        }
+    }
+    fun monitorSurface(surface:Surface?){
+        if(closing || encoder==null)return
+        handler.post {
+            if(closing)return@post
+            EGL14.eglMakeCurrent(display,encodeWindow,encodeWindow,context)
+            if(previewWindow!=EGL14.EGL_NO_SURFACE)EGL14.eglDestroySurface(display,previewWindow)
+            previewWindow=if(surface?.isValid==true)EGL14.eglCreateWindowSurface(display,windowConfig,surface,intArrayOf(EGL14.EGL_NONE),0) else EGL14.EGL_NO_SURFACE
+        }
     }
     fun close(){
         if(closing)return
