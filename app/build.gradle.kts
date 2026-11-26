@@ -21,5 +21,6 @@ android {
 
 dependencies {
     implementation("com.google.android.gms:play-services-auth:21.4.0")
+    implementation("com.google.zxing:core:3.5.3")
     implementation("com.github.pedroSG94.RootEncoder:srt:2.8.2")
 }

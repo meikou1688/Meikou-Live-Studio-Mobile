@@ -51,7 +51,7 @@ class ScreenService:Service(){
                         android.widget.Toast.makeText(this,saved?.let{"已儲存 "+it}?:if(ok)"已結束螢幕分享" else "螢幕擷取或網路傳輸未完成",android.widget.Toast.LENGTH_LONG).show()
                         current=null;running=false;stopForeground(STOP_FOREGROUND_REMOVE);stopSelf()
                     }
-                },projection).also{it.microphoneMuted.set(intent.getBooleanExtra("muted",false));it.start()}
+                },projection).also{it.mixPlayback=intent.getBooleanExtra("playback",false);it.microphoneMuted.set(intent.getBooleanExtra("muted",false));it.start()}
         }catch(e:Exception){running=false;current?.stop();stopForeground(STOP_FOREGROUND_REMOVE);stopSelf();android.widget.Toast.makeText(this,"無法啟動螢幕分享，請確認系統授權",android.widget.Toast.LENGTH_LONG).show()}
         return START_NOT_STICKY
     }

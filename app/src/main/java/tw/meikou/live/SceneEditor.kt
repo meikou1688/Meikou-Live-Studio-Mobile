@@ -48,10 +48,10 @@ class SceneEditor(private val host:Activity,private val scenes:Scenes,private va
             }else add(Overlay(kind="image",value=uri.toString(),bitmap=scenes.decode(uri)))
         }catch(e:Exception){toast("無法讀取素材，請重新選擇")}
     }
-    private fun title(v:Overlay)=when(v.kind){"image"->"圖片／台標";"video"->"影片（靜音循環）";"clock"->"時鐘";"ticker"->"跑馬燈 · "+v.value;else->"文字 · "+v.value}
+    private fun title(v:Overlay)=when(v.kind){"image"->"圖片／台標";"video"->"影片（靜音循環）";"clock"->"時鐘";"date"->"日期";"qr"->"QR Code";"score"->"比分板";"ticker"->"跑馬燈 · "+v.value;else->"文字 · "+v.value}
     fun edit(){
         val layers=scenes.active.layers.reversed()
-        val choices=listOf("新增文字","新增圖片／台標","新增跑馬燈","新增時鐘","新增影片（靜音循環）")+layers.map{title(it)}
+        val choices=listOf("新增文字","新增圖片／台標","新增跑馬燈","新增時鐘","新增影片（靜音循環）","新增日期","新增 QR Code","新增比分板")+layers.map{title(it)}
         AlertDialog.Builder(host).setTitle("素材圖層 · "+scenes.active.name).setItems(choices.toTypedArray()){_,i->
             when(i){
                 0->prompt("文字內容"){add(Overlay(kind="text",value=it))}
@@ -59,7 +59,12 @@ class SceneEditor(private val host:Activity,private val scenes:Scenes,private va
                 2->prompt("跑馬燈文字"){add(Overlay(kind="ticker",value=it,y=.85f,width=.6f))}
                 3->add(Overlay(kind="clock",value="",x=.8f,y=.12f,width=.23f))
                 4->if(canPick())host.startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).setType("video/*").addCategory(Intent.CATEGORY_OPENABLE),PICK_VIDEO) else toast("請於開播前匯入影片")
-                else->actions(layers[i-5])
+                5->add(Overlay(kind="date",value="",x=.8f,y=.2f,width=.23f))
+                6->prompt("QR Code 網址或文字"){add(Overlay(kind="qr",value=it,width=.18f))}
+                7->prompt("左隊隊名"){left->prompt("右隊隊名"){right->
+                    add(Overlay(kind="score",value=org.json.JSONArray().put(left).put(right).put(0).put(0).toString(),y=.14f))
+                }}
+                else->actions(layers[i-8])
             }
         }.show()
     }
@@ -67,6 +72,7 @@ class SceneEditor(private val host:Activity,private val scenes:Scenes,private va
     private fun actions(v:Overlay){
         val opts=mutableListOf("選取並調整位置",if(v.locked)"解除鎖定" else "鎖定圖層","移到最上層","移到最下層","移除")
         if(v.kind=="text" || v.kind=="ticker")opts.add("修改文字")
+        if(v.kind=="score")opts.addAll(listOf("左隊加一分","右隊加一分","左隊減一分","右隊減一分"))
         AlertDialog.Builder(host).setTitle(title(v)).setItems(opts.toTypedArray()){_,i->
             val rest=scenes.active.layers.filterNot{it.id==v.id}
             when(i){
@@ -75,7 +81,12 @@ class SceneEditor(private val host:Activity,private val scenes:Scenes,private va
                 2->scenes.layers(rest+v)
                 3->scenes.layers(listOf(v)+rest)
                 4->{scenes.layers(rest);selected=null}
-                5->prompt("修改文字",v.value){modify(v.copy(value=it))}
+                in 5..8->if(v.kind=="score"){
+                    val scores=org.json.JSONArray(v.value)
+                    val side=if(i==5 || i==7)2 else 3
+                    scores.put(side,(scores.getInt(side)+if(i<=6)1 else -1).coerceAtLeast(0))
+                    modify(v.copy(value=scores.toString()))
+                }else prompt("修改文字",v.value){modify(v.copy(value=it))}
             }
         }.show()
     }

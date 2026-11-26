@@ -13,6 +13,9 @@ def test():
     geometry=out/"camera-geometry-check.jar"
     compile_kotlin([root/"app/src/main/java/tw/meikou/live/CameraGeometry.kt",root/"tools/CameraGeometryCheck.kt"],geometry)
     run(java,"-cp",str(geometry)+os.pathsep+str(gradle/"lib/kotlin-stdlib-2.0.21.jar"),"tw.meikou.live.CameraGeometryCheckKt")
+    pcm=out/"mute-check.jar"
+    compile_kotlin([root/"app/src/main/java/tw/meikou/live/Pcm.kt",root/"tools/MuteCheck.kt"],pcm)
+    run(java,"-cp",str(pcm)+os.pathsep+str(gradle/"lib/kotlin-stdlib-2.0.21.jar"),"tw.meikou.live.MuteCheckKt")
     fixture=out/"chart.flv"
     run("ffmpeg","-hide_banner","-loglevel","error","-y","-f","lavfi","-i","testsrc2=size=640x360:rate=30","-f","lavfi","-i","sine=frequency=880:sample_rate=48000","-t","3","-c:v","libx264","-profile:v","baseline","-g","30","-c:a","aac",fixture)
     jar=out/"check.jar"

@@ -19,7 +19,7 @@ private data class Frame(val audio:Boolean,val pts:Long,val flags:Int,val bytes:
 class Capture(private val ctx:Context, private val preview:Surface?, private val profile:Profile,private val scenes:Scenes,
               private var lens:Lens?, private val inputDevice:AudioDeviceInfo?, private val initialZoom:Float, private var exposureIndex:Int, private var settings:CameraSettings, private val telemetry:(String)->Unit, private val target:URI?, additional:List<URI>, outputStatus:(Int,String)->Unit, private val file:File?, private val notify:(Int)->Unit,
               private val finished:(Boolean,Boolean,Boolean)->Unit,
-              private val projection:android.media.projection.MediaProjection?=null) {
+              private val projection:android.media.projection.MediaProjection?=null,private val unsupportedLens:((Lens)->Unit)?=null) {
     private var virtualDisplay:android.hardware.display.VirtualDisplay?=null
     private val projectionCallback=object:android.media.projection.MediaProjection.Callback(){override fun onStop(){stop()}}
     private val stopping=AtomicBoolean()
@@ -34,6 +34,9 @@ class Capture(private val ctx:Context, private val preview:Surface?, private val
     private var video:MediaCodec?=null
     private var audio:MediaCodec?=null
     private var mic:AudioRecord?=null
+    var mixPlayback=false
+    private var playback:AudioRecord?=null
+    private val playbackBuffer=ByteBuffer.allocateDirect(2048)
     var reduceNoise=false
     private var suppressor:android.media.audiofx.NoiseSuppressor?=null
     private var encoderSurface:Surface?=null
@@ -82,6 +85,7 @@ class Capture(private val ctx:Context, private val preview:Surface?, private val
                 }
                 if(!stopping.get()){
                     startNs=System.nanoTime()
+                    playback?.let{it.startRecording();check(it.recordingState==AudioRecord.RECORDSTATE_RECORDING)}
                     mic!!.startRecording()
                     check(mic!!.recordingState==AudioRecord.RECORDSTATE_RECORDING)
                     audioOrigin=(System.nanoTime()-startNs)/1000
@@ -96,6 +100,7 @@ class Capture(private val ctx:Context, private val preview:Surface?, private val
             runCatching{projection?.unregisterCallback(projectionCallback)}
             runCatching{projection?.stop()}
             runCatching{compositor?.close()}
+            runCatching{playback?.stop()};runCatching{playback?.release()}
             runCatching{suppressor?.release()};runCatching{mic?.stop()};runCatching{mic?.release()}
             if(muxStarted && !recordingFailed){
                 runCatching{video!!.signalEndOfInputStream();val id=audio!!.dequeueInputBuffer(20000)
@@ -136,6 +141,16 @@ class Capture(private val ctx:Context, private val preview:Surface?, private val
         require(min>0)
         mic=AudioRecord(MediaRecorder.AudioSource.CAMCORDER,48000,AudioFormat.CHANNEL_IN_MONO,AudioFormat.ENCODING_PCM_16BIT,maxOf(min*2,8192))
         check(mic!!.state==AudioRecord.STATE_INITIALIZED)
+        if(mixPlayback){
+            val policy=AudioPlaybackCaptureConfiguration.Builder(requireNotNull(projection))
+                .addMatchingUsage(AudioAttributes.USAGE_MEDIA).addMatchingUsage(AudioAttributes.USAGE_GAME)
+                .addMatchingUsage(AudioAttributes.USAGE_UNKNOWN).excludeUid(android.os.Process.myUid()).build()
+            val pcm=AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT).setSampleRate(48000)
+                .setChannelMask(AudioFormat.CHANNEL_IN_MONO).build()
+            playback=AudioRecord.Builder().setAudioFormat(pcm).setBufferSizeInBytes(maxOf(min*2,8192))
+                .setAudioPlaybackCaptureConfig(policy).build()
+            check(playback!!.state==AudioRecord.STATE_INITIALIZED)
+        }
         if(reduceNoise){
             suppressor=android.media.audiofx.NoiseSuppressor.create(mic!!.audioSessionId)
             check(suppressor?.setEnabled(true)==android.media.audiofx.AudioEffect.SUCCESS && suppressor?.enabled==true)
@@ -199,12 +214,18 @@ class Capture(private val ctx:Context, private val preview:Surface?, private val
         baseline?.let{settings.applyTo(req,it)}
         req.set(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION,exposureIndex)
         if(lens.physical==null && lens.zoomMax>lens.zoomMin)req.set(CaptureRequest.CONTROL_ZOOM_RATIO,zoom)
+        var unmatched=0
         session?.setRepeatingRequest(req.build(),object:CameraCaptureSession.CaptureCallback(){
             override fun onCaptureCompleted(s:CameraCaptureSession,r:CaptureRequest,result:TotalCaptureResult){
                 val active=result[CaptureResult.LOGICAL_MULTI_CAMERA_ACTIVE_PHYSICAL_ID]
-                val focal=result[CaptureResult.LENS_FOCAL_LENGTH]
+                if(s!==session)return
+                val physical=result.physicalCameraResults[lens.physical]
+                if(lens.physical!=null && physical==null && active!=lens.physical){
+                    if(++unmatched==30)unsupportedLens?.invoke(lens)
+                }else unmatched=0
+                val focal=(physical?:result)[CaptureResult.LENS_FOCAL_LENGTH]
                 val route=mic?.routedDevice?.productName ?: "未回報"
-                val label="音訊 "+route+" · 作用中 ID "+(active?:"未回報")+" · "+(focal?.toString()?:"—")+" mm"
+                val label="音訊 "+route+" · 作用中 ID "+(if(physical!=null)lens.physical else active?:if(lens.physical==null)lens.parent else "待確認")+" · "+(focal?.toString()?:"—")+" mm"
                 if(label!=lastTelemetry){lastTelemetry=label;telemetry(label)}
             }
         },Handler(camThread.looper))
@@ -241,6 +262,12 @@ class Capture(private val ctx:Context, private val preview:Surface?, private val
         val n=mic!!.read(b,minOf(2048,b.capacity()),AudioRecord.READ_BLOCKING)
         require(n>=0)
         if(microphoneMuted.get())silencePcm(b,n)
+        playback?.let{
+            playbackBuffer.clear()
+            val read=it.read(playbackBuffer,n,AudioRecord.READ_NON_BLOCKING)
+            check(read>=0)
+            mixPcm(b,playbackBuffer,read)
+        }
         c.queueInputBuffer(i,0,n,audioOrigin+samples*1000000/48000,0)
         samples+=n/2
     }

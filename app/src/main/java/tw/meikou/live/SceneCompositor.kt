@@ -19,6 +19,7 @@ class SceneCompositor(private val ctx:android.content.Context,private val width:
     private var display=EGL14.EGL_NO_DISPLAY
     private var context=EGL14.EGL_NO_CONTEXT
     private var previewWindow=EGL14.EGL_NO_SURFACE
+    private var lastRotation=initialLens?.rotation(ctx)?:0
     private var windowConfig:EGLConfig?=null
     private var encodeWindow=EGL14.EGL_NO_SURFACE
     private var cameraProgram=0
@@ -76,6 +77,7 @@ class SceneCompositor(private val ctx:android.content.Context,private val width:
         }
     }
     private val sprites=mutableMapOf<String,Sprite>()
+    private val date=SimpleDateFormat("yyyy/MM/dd",Locale.TAIWAN)
     private val clock=SimpleDateFormat("HH:mm:ss",Locale.TAIWAN)
     @Volatile private var closing=false
     private fun <T> onWorker(block:()->T):T{val task=FutureTask(block);check(handler.post(task));return task.get()}
@@ -121,10 +123,21 @@ class SceneCompositor(private val ctx:android.content.Context,private val width:
         source.setOnFrameAvailableListener({if(!closing)try{render()}catch(e:Exception){if(!closing)failed()}},handler)
     }
     private fun sprite(v:Overlay):Sprite?{
-        val text=if(v.kind=="clock")clock.format(Date()) else v.value
+        val text=when(v.kind){
+            "clock"->clock.format(Date())
+            "date"->date.format(Date())
+            "score"->runCatching { val s=org.json.JSONArray(v.value);"${s.getString(0)}  ${s.getInt(2)}：${s.getInt(3)}  ${s.getString(1)}" }.getOrElse{return null}
+            else->v.value
+        }
         val old=sprites[v.id]
         if(old!=null && old.stamp==text)return old
-        val image=if(v.kind=="image")v.bitmap?:return null else{
+        val image=if(v.kind=="image")v.bitmap?:return null else if(v.kind=="qr"){
+            val size=384
+            val grid=com.google.zxing.qrcode.QRCodeWriter().encode(text,com.google.zxing.BarcodeFormat.QR_CODE,size,size,
+                mapOf(com.google.zxing.EncodeHintType.CHARACTER_SET to "UTF-8"))
+            val pixels=IntArray(size*size){if(grid[it%size,it/size])Color.BLACK else Color.WHITE}
+            Bitmap.createBitmap(pixels,size,size,Bitmap.Config.ARGB_8888)
+        }else{
             val pen=Paint(Paint.ANTI_ALIAS_FLAG).apply{color=Color.WHITE;textSize=54f;typeface=Typeface.DEFAULT_BOLD}
             val w=ceil(pen.measureText(text)).toInt().coerceIn(1,2000)+24
             Bitmap.createBitmap(w,84,Bitmap.Config.ARGB_8888).also{
@@ -148,7 +161,8 @@ class SceneCompositor(private val ctx:android.content.Context,private val width:
     private fun render(){
         source.updateTexImage();source.getTransformMatrix(matrix)
         val selected=lens
-        val rotation=selected?.rotation(ctx)?:0
+        if(previewWindow!=EGL14.EGL_NO_SURFACE)lastRotation=selected?.rotation(ctx)?:0
+        val rotation=lastRotation
         android.opengl.Matrix.setIdentityM(viewTransform,0)
         android.opengl.Matrix.translateM(viewTransform,0,.5f,.5f,0f)
         android.opengl.Matrix.rotateM(viewTransform,0,rotation.toFloat(),0f,0f,1f)

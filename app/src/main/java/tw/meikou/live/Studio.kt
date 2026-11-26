@@ -492,7 +492,16 @@ class Studio:Activity(){
                     live.text="取消重新連線"
                     handlers.postDelayed({waiting=false;if(visible && capture==null)begin(true)},delay)
                 }else{attempts=0;previewSelected()}
-            }})
+            }},unsupportedLens={unavailable->runOnUiThread{
+            if(selected==unavailable && capture!=null){
+                val main=(0 until lenses.count).firstOrNull { index ->
+                    val candidate=lenses.getItemAtPosition(index) as Lens
+                    !candidate.front && candidate.physical==null && p.fps in candidate.supportedRates[size].orEmpty()
+                }
+                if(main!=null){status.text="無法確認實體鏡頭，已要求切回主鏡頭";lenses.setSelection(main)}
+                else{ending=true;capture?.stop();status.text="無可用的主鏡頭組合，已停止擷取"}
+            }
+        }})
         capture=session
         reduceNoise?.isEnabled=false
         session.reduceNoise=reduceNoise?.isChecked==true
@@ -519,16 +528,18 @@ class Studio:Activity(){
     private fun screenMenu(){
         if(ScreenService.running){startService(Intent(this,ScreenService::class.java).setAction(ScreenService.STOP));return}
         if(capture!=null || waiting || !granted()){status.text="請先停止相機直播或錄影，並允許麥克風權限";return}
-        choose("螢幕分享",listOf("直播螢幕與麥克風","錄製螢幕與麥克風")){choice->
-            val url=if(choice==0)runCatching{primaryDestination(address.text.toString(),streamKey.text.toString())}.getOrNull() else null
-            if(choice==0 && (url==null || url in additional)){status.text="請先設定有效且不重複的推流網址";return@choose}
+        choose("螢幕分享",listOf("直播螢幕與麥克風","錄製螢幕與麥克風","直播螢幕、麥克風與內部音訊","錄製螢幕、麥克風與內部音訊")){choice->
+            val stream=choice%2==0
+            val url=if(stream)runCatching{primaryDestination(address.text.toString(),streamKey.text.toString())}.getOrNull() else null
+            if(stream && (url==null || url in additional)){status.text="請先設定有效且不重複的推流網址";return@choose}
             val size=sizes.selectedItem as? android.util.Size ?:android.util.Size(1280,720)
             pendingScreen=Intent(this,ScreenService::class.java).apply{
+                putExtra("playback",choice>=2)
                 putExtra("w",if(portrait)size.height else size.width);putExtra("h",if(portrait)size.width else size.height)
                 putExtra("fps",rates.selectedItem as? Int ?:30);putExtra("bitrate",((bits.selectedItem as? Int)?:4)*1000000)
                 putExtra("target",url?.toString());putExtra("record",saveLive.isChecked);putExtra("muted",mute.isChecked)
                 putExtra("input",devices.getOrNull(inputs.selectedItemPosition-1)?.id?:-1)
-                putStringArrayListExtra("additional",ArrayList(if(choice==0)additional.map{it.toString()} else emptyList()))
+                putStringArrayListExtra("additional",ArrayList(if(stream)additional.map{it.toString()} else emptyList()))
             }
             val manager=getSystemService(MEDIA_PROJECTION_SERVICE) as android.media.projection.MediaProjectionManager
             startActivityForResult(manager.createScreenCaptureIntent(),703)
