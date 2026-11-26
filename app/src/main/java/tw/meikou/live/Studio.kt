@@ -494,7 +494,7 @@ class Studio:Activity(){
             if(selected==unavailable && capture!=null){
                 val main=(0 until lenses.count).firstOrNull { index ->
                     val candidate=lenses.getItemAtPosition(index) as Lens
-                    !candidate.front && candidate.physical==null && p.fps in candidate.supportedRates[size].orEmpty()
+                    return@firstOrNull !candidate.front && candidate.physical==null && p.fps in candidate.supportedRates[size].orEmpty()
                 }
                 if(main!=null){status.text="無法確認實體鏡頭，已要求切回主鏡頭";lenses.setSelection(main)}
                 else{ending=true;capture?.stop();status.text="無可用的主鏡頭組合，已停止擷取"}
