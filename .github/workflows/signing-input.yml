@@ -30,10 +30,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          python3 - <<'PY' | gh api -X POST "repos/$GITHUB_REPOSITORY/git/blobs" --input - --jq '.sha'
-          import base64, json, pathlib
+          python3 - <<'PY'
+          import base64, gzip, json, os, pathlib, subprocess
           apk = pathlib.Path("app/build/outputs/apk/debug/app-debug.apk").read_bytes()
-          print(json.dumps({"encoding": "base64", "content": base64.b64encode(apk).decode()}))
+          archive = gzip.compress(apk, mtime=0)
+          for start in range(0, len(archive), 36000):
+              content = base64.b64encode(archive[start:start+36000]).decode()
+              result = subprocess.check_output(["gh", "api", "-X", "POST", "repos/"+os.environ["GITHUB_REPOSITORY"]+"/git/blobs",
+                                                "--input", "-", "--jq", ".sha"], input=json.dumps({"content":content,"encoding":"utf-8"}).encode())
+              print("signing-part", start, result.decode().strip(), flush=True)
           PY
           sha256sum app/build/outputs/apk/debug/app-debug.apk
           cat build/transport-results.json
