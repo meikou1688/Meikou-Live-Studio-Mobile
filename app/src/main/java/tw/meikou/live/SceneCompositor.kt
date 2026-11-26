@@ -30,6 +30,10 @@ class SceneCompositor(private val ctx:android.content.Context,private val width:
     private val cameraTransform=FloatArray(16)
     private val viewTransform=FloatArray(16)
     private val matrix=FloatArray(16)
+    private val rawCrop=FloatArray(16)
+    private val windowSize=IntArray(2)
+    private val canvasViewport=IntArray(4)
+    private val cameraViewport=IntArray(4)
     private val identity=FloatArray(16).also{android.opengl.Matrix.setIdentityM(it,0)}
     private val square=floatArrayOf(-1f,-1f,1f,-1f,-1f,1f,1f,1f)
     private fun floats(v:FloatArray)=ByteBuffer.allocateDirect(v.size*4).order(ByteOrder.nativeOrder()).asFloatBuffer().apply{put(v);position(0)}
@@ -136,12 +140,14 @@ class SceneCompositor(private val ctx:android.content.Context,private val width:
     private fun render(){
         source.updateTexImage();source.getTransformMatrix(matrix)
         val selected=lens
+        val rotation=selected?.rotation(ctx)?:0
         android.opengl.Matrix.setIdentityM(viewTransform,0)
         android.opengl.Matrix.translateM(viewTransform,0,.5f,.5f,0f)
-        android.opengl.Matrix.rotateM(viewTransform,0,(selected?.rotation(ctx)?:0).toFloat(),0f,0f,1f)
+        android.opengl.Matrix.rotateM(viewTransform,0,rotation.toFloat(),0f,0f,1f)
         if(selected?.front==true && scenes.mirrorSelfie)android.opengl.Matrix.scaleM(viewTransform,0,-1f,1f,1f)
         android.opengl.Matrix.translateM(viewTransform,0,-.5f,-.5f,0f)
-        android.opengl.Matrix.multiplyMM(cameraTransform,0,matrix,0,viewTransform,0)
+        if(selected!=null)CameraGeometry.cameraCrop(matrix,rawCrop)
+        android.opengl.Matrix.multiplyMM(cameraTransform,0,if(selected!=null)rawCrop else matrix,0,viewTransform,0)
         val layers=scenes.active.layers
         val iter=sprites.iterator();while(iter.hasNext()){val e=iter.next();if(layers.none{it.id==e.key}){glDeleteTextures(1,intArrayOf(e.value.tex),0);iter.remove()}}
         val time=SystemClock.elapsedRealtime()
@@ -159,9 +165,20 @@ class SceneCompositor(private val ctx:android.content.Context,private val width:
             }
         }
         fun output(window:EGLSurface,record:Boolean){
-            check(EGL14.eglMakeCurrent(display,window,window,context));glViewport(0,0,width,height)
+            check(EGL14.eglMakeCurrent(display,window,window,context))
+            check(EGL14.eglQuerySurface(display,window,EGL14.EGL_WIDTH,windowSize,0))
+            check(EGL14.eglQuerySurface(display,window,EGL14.EGL_HEIGHT,windowSize,1))
+            if(windowSize[0]<=0 || windowSize[1]<=0)return
+            CameraGeometry.fit(width,height,windowSize[0],windowSize[1],canvasViewport)
+            val landscapeInput=selected!=null && rotation%180==0
+            val inputW=if(selected==null)width else if(landscapeInput)maxOf(width,height) else minOf(width,height)
+            val inputH=if(selected==null)height else if(landscapeInput)minOf(width,height) else maxOf(width,height)
+            CameraGeometry.fit(inputW,inputH,canvasViewport[2],canvasViewport[3],cameraViewport)
+            glClearColor(0f,0f,0f,1f);glClear(GL_COLOR_BUFFER_BIT)
+            glViewport(canvasViewport[0]+cameraViewport[0],canvasViewport[1]+cameraViewport[1],cameraViewport[2],cameraViewport[3])
             glDisable(GL_BLEND);coords.position(0);coords.put(square);coords.position(0)
             draw(cameraProgram,GLES11Ext.GL_TEXTURE_EXTERNAL_OES,cameraTex,cameraUv,cameraTransform)
+            glViewport(canvasViewport[0],canvasViewport[1],canvasViewport[2],canvasViewport[3])
             glEnable(GL_BLEND);glBlendFunc(GL_ONE,GL_ONE_MINUS_SRC_ALPHA)
             for((layer,img) in visible){
                 val w=layer.width*width;val h=w/img.aspect

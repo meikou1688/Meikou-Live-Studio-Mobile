@@ -155,7 +155,6 @@ class Studio:Activity(){
         val size=l.sizes.minByOrNull{kotlin.math.abs(it.width-1280)}?:return
         val w=if(portrait)size.height else size.width
         val h=if(portrait)size.width else size.height
-        preview.holder.setFixedSize(w,h)
         val view=Viewfinder(this,l,preview.holder.surface,w,h,scenes,settings,{if(visible)status.text="這個鏡頭的預覽組合無法啟動"},{
             finder=null;val next=afterClose;afterClose=null;if(visible && ready)next?.invoke()
         })
@@ -213,7 +212,7 @@ class Studio:Activity(){
         netText=label("網路 · 檢查中");reading=label("尚未擷取")
         section("鏡頭控制")
         rotateButton=button(if(portrait)"切換為橫式" else "切換為直式"){
-            requestedOrientation=if(portrait)android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE else android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+            requestedOrientation=if(portrait)android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE else android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
         }
         panel.addView(CheckBox(this).apply{text="自拍鏡像";setOnCheckedChangeListener{_,on->scenes.mirrorSelfie=on}})
         shortcuts=LinearLayout(this);panel.addView(shortcuts)
@@ -364,7 +363,6 @@ class Studio:Activity(){
         val recordFile=!stream || saveLive.isChecked
         if(recordFile && folder==null){status.text="無法使用錄影資料夾";return}
         val file=if(!recordFile)null else File(folder,"Meikou-"+System.currentTimeMillis()+".mp4")
-        preview.holder.setFixedSize(p.width,p.height)
         ending=false;profile=p;status.text="正在啟動影音擷取"
         listOf(rotateButton,editOutputs,saveLive,inputs,sizes,rates,bits,codecs,address).forEach{it.isEnabled=false}
         live.isEnabled=stream;record.isEnabled=!stream

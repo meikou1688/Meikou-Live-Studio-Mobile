@@ -1,7 +1,6 @@
 package tw.meikou.live
 
 import android.hardware.camera2.*
-import android.media.MediaCodec
 import android.util.Size
 import java.util.Locale
 
@@ -21,7 +20,7 @@ fun inventory(m:CameraManager):List<Lens> = buildList{
         for(physical in listOf<String?>(null)+parent.physicalCameraIds.sorted()){
             val c=runCatching{m.getCameraCharacteristics(physical?:id)}.getOrNull()?:continue
             val map=c[CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP]?:continue
-            val sizes=map.getOutputSizes(MediaCodec::class.java).orEmpty().filter{it.width>=640 && it.width<=3840 && it.width*9==it.height*16}.distinct().sortedBy{it.width}
+            val sizes=map.getOutputSizes(android.graphics.SurfaceTexture::class.java).orEmpty().filter{it.width>=640 && it.width<=3840 && it.width*9==it.height*16}.distinct().sortedBy{it.width}
             if(sizes.isEmpty())continue
             val zoom=parent[CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE]
             val rates=c[CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES].orEmpty().map{it.upper}.distinct().sorted()
