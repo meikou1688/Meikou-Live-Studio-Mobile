@@ -37,7 +37,11 @@ class BackgroundCheck : Instrumentation() {
         val editor=ui { field(activity,"sceneEditor") as SceneEditor }
         val canvas=ui { editor.javaClass.getDeclaredField("preview").apply{isAccessible=true}.get(editor) as LayerCanvas }
         ui {scenes.layers(listOf(Overlay(id="qr-test",kind="qr",value="Meikou-camera-check",x=.3f,y=.5f,width=.20f)))}
-        until { scenes.previewLayers.any{it.id=="qr-test"} }
+        // The same Activity is reused for RTMP, SRT and H.265 runs. Do not let the
+        // previous run's rendered frame satisfy this wait before the reset reaches GL.
+        until { scenes.previewLayers.singleOrNull()?.let{
+            it.id=="qr-test" && kotlin.math.abs(it.x-.3f)<.01f && kotlin.math.abs(it.width-.20f)<.01f
+        }==true }
         fun drag(x:Float,y:Float,toX:Float,toY:Float){
             ui{
                 val start=SystemClock.uptimeMillis()
