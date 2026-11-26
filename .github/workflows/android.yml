@@ -24,6 +24,7 @@ jobs:
           export GRADLE_HOME="$(dirname "$(dirname "$(realpath "$(command -v gradle)")")")"
           python3 tools/test_transport.py
           timeout 45 bash tools/test_rtmps.sh
+          timeout 55 bash tools/test_reconnect.sh
       - uses: actions/upload-artifact@v4
         if: always()
         with:

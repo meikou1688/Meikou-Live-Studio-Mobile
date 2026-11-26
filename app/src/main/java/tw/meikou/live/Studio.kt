@@ -473,7 +473,7 @@ class Studio:Activity(){
         val session=Capture(this,preview.holder.surface,p,scenes,l,devices.getOrNull(inputs.selectedItemPosition-1),zoomRatio(l,zoom.progress),exposureCompensation,settings,{s->runOnUiThread{reading.text=s}},uri,if(stream)additional else emptyList(),{index,value->runOnUiThread{
             outputStates[index]=value;outputSummary.text=outputStates.entries.joinToString("  "){"目的地 "+it.key+"："+it.value}
         }},file,
-            {mode->runOnUiThread{if(!ending){if(backgroundActive && mode==1)CameraLiveService.update("相機直播中，可點選停止直播");monitorState(mode==1);status.text=when{mode!=1->"錄影中";file!=null->"直播中 · 同步錄影中";else->"直播中 · 已送出影音"}}}},
+            {mode->runOnUiThread{if(!ending){if(backgroundActive)CameraLiveService.update(if(mode==3)"網路中斷，正在重新連線" else "相機直播中，可點選停止直播");monitorState(mode==1);status.text=when{mode==3->if(file!=null)"重新連線中 · 本機繼續錄影" else "正在重新連線";mode!=1->"錄影中";file!=null->"直播中 · 同步錄影中";else->"直播中 · 已送出影音"}}}},
             {ok,networkError,recorded->
                 val saved=if(recorded && file!=null)saveMovie(file) else null
                 runOnUiThread{if(backgroundActive){CameraLiveService.finish();backgroundActive=false};backgroundLive.isEnabled=true;reduceNoise?.isEnabled=true;capture=null;profile=null;monitorState(false)

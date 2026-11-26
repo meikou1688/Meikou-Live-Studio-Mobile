@@ -25,7 +25,10 @@ class Capture(private val ctx:Context, private val preview:Surface?, private val
     private val bad=AtomicBoolean()
     private val additionalOutputs=additional.isNotEmpty()
     private val extra=ExtraOutputs(additional,outputStatus)
-    private val client=target?.takeUnless { it.scheme=="srt" }?.let { Rtmp(it) }
+    private val client=target?.takeUnless { it.scheme=="srt" }?.let { destination ->
+        ReconnectingRtmp(destination,{up->if(!stopping.get())notify(if(up)1 else 3)},
+            {video?.setParameters(Bundle().apply{putInt(MediaCodec.PARAMETER_KEY_REQUEST_SYNC_FRAME,0)})})
+    }
     private val srt=target?.takeIf { it.scheme=="srt" }?.let { SrtOutput(it,profile.hevc) }
     private val camThread=HandlerThread("Camera")
     private var camera:CameraDevice?=null
@@ -329,7 +332,7 @@ class Capture(private val ctx:Context, private val preview:Surface?, private val
         }
         if(!stopping.get()){
             delivered[if(a)1 else 0]=true
-            if(!published && srt?.sentBoth()!=false && delivered.all{it} && (mux==null || recorded.all{it})){
+            if(!published && client?.sentBoth()!=false && srt?.sentBoth()!=false && delivered.all{it} && (mux==null || recorded.all{it})){
                 published=true
                 notify(if(target!=null)1 else 2)
             }

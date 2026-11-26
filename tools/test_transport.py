@@ -23,7 +23,7 @@ def test():
     run("ffmpeg","-hide_banner","-loglevel","error","-y","-f","lavfi","-i","testsrc2=size=640x360:rate=30","-f","lavfi","-i","sine=frequency=880:sample_rate=48000","-t","3","-c:v","libx264","-profile:v","baseline","-g","30","-c:a","aac",fixture)
     jar=out/"check.jar"
     folder=root/"app/src/main/java/tw/meikou/live"
-    compile_kotlin([folder/"Rtmp.kt",folder/"Avc.kt",folder/"StreamDestination.kt",root/"tools/PublisherCheck.kt",root/"tools/StreamDestinationCheck.kt"],jar)
+    compile_kotlin([folder/"Rtmp.kt",folder/"ReconnectingRtmp.kt",root/"tools/ReconnectCheck.kt",folder/"Avc.kt",folder/"StreamDestination.kt",root/"tools/PublisherCheck.kt",root/"tools/StreamDestinationCheck.kt"],jar)
     run(java,"-cp",str(jar)+os.pathsep+str(gradle/"lib/kotlin-stdlib-2.0.21.jar"),"tw.meikou.live.StreamDestinationCheckKt")
     from pipe_receiver import receive
     sample=out/"pipe-received.flv"

@@ -44,7 +44,7 @@ class ScreenService:Service(){
             val input=(getSystemService(AUDIO_SERVICE) as AudioManager).getDevices(AudioManager.GET_DEVICES_INPUTS).firstOrNull{it.id==intent.getIntExtra("input",-1)}
             running=true
             current=Capture(this,null,profile,Scenes(this),null,input,1f,0,CameraSettings(),{},target,urls,{_,_->},file,
-                {mode->main.post{notices.notify(11,notice(if(mode==1)"正在傳送螢幕與麥克風" else "正在錄製螢幕與麥克風"))}},
+                {mode->main.post{notices.notify(11,notice(when(mode){1->"正在傳送螢幕與麥克風";3->"網路中斷，正在重新連線";else->"正在錄製螢幕與麥克風"}))}},
                 {ok,_,recorded->
                     val saved=if(recorded && file!=null)saveMovie(file) else null
                     main.post{
