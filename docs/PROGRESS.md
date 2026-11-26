@@ -35,3 +35,11 @@ Google Auth Platform 已在專案 `meikou-live-studio-mobile` 建立 Android OAu
 Android 版加入 Google Identity Services 授權流程，使用 youtube.readonly 讀取實際登入的 YouTube 頻道名稱。由使用者在待機時啟動。此步驟不會建立直播或變更頻道內容。需在對應簽章及已安裝 Google Play 服務的手機驗證授權、取消、網路錯誤及頻道名稱。公開的 0.1.2 APK 未包含本功能。
 
 使用 Gradle 8.13、JDK 17 執行 gradle :app:assembleDebug。主要相依套件為 Google Maven 發布的 com.google.android.gms:play-services-auth:21.4.0。建置機的偵錯簽章與實機測試簽章不同時，需重新使用登記的金鑰簽署。GitHub Actions 產物供編譯驗證。
+
+## 0.1.5 操作與設計
+
+參考 PRISM Mobile 官方指南中素材工作區與純取景的分工，使用 Meikou 原生 Android 介面。手勢先對照實際合成畫面的圖層順序及旋轉範圍，只有在空白處起手才處理橫向切換。直播或錄影時保留停止控制。
+
+參考來源：https://guide.prismlive.com/mobile/guides/getting-started-with-prism-mobile
+
+鏡頭與素材觸控須在 VIVO X300 Ultra 實測，另需其他品牌手機確認 Camera2 實體鏡頭開放程度。

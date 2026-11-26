@@ -18,11 +18,12 @@ jobs:
       - name: Compile APK
         run: gradle :app:assembleDebug --console=plain
       - name: Install media test tools
-        run: sudo apt-get update -qq && sudo apt-get install -y ffmpeg
+        run: sudo apt-get update -qq && sudo apt-get install -y ffmpeg socat
       - name: Decode media received over TCP and UDP
         run: |
           export GRADLE_HOME="$(dirname "$(dirname "$(realpath "$(command -v gradle)")")")"
           python3 tools/test_transport.py
+          timeout 45 bash tools/test_rtmps.sh
       - uses: actions/upload-artifact@v4
         if: always()
         with:
