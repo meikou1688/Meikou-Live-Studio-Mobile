@@ -12,8 +12,10 @@ data class Overlay(val id:String=UUID.randomUUID().toString(),val kind:String,va
     val x:Float=.5f,val y:Float=.5f,val width:Float=.35f,val angle:Float=0f,val locked:Boolean=false,
     val bitmap:Bitmap?=null)
 data class Scene(val id:String=UUID.randomUUID().toString(),val name:String,val layers:List<Overlay> = emptyList())
+data class LayerFrame(val id:String,val x:Float,val y:Float,val width:Float,val height:Float,val angle:Float)
 
 class Scenes(private val ctx:Context){
+    @Volatile var previewLayers:List<LayerFrame> = emptyList()
     private val prefs=ctx.getSharedPreferences("scene-v1",Context.MODE_PRIVATE)
     @Volatile var mirrorSelfie=false
     @Volatile var active=Scene(name="現場")

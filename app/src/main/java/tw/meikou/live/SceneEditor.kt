@@ -7,7 +7,7 @@ import android.view.*
 import android.widget.*
 import kotlin.math.*
 
-class SceneEditor(private val host:Activity,private val scenes:Scenes,private val preview:SurfaceView,private val canPick:()->Boolean){
+class SceneEditor(private val host:Activity,private val scenes:Scenes,private val preview:LayerCanvas,private val canPick:()->Boolean){
     companion object{const val PICK=701;const val PICK_VIDEO=702}
     private var selected:String?=null
     private var previousX=0f
@@ -15,7 +15,11 @@ class SceneEditor(private val host:Activity,private val scenes:Scenes,private va
     private var previousSpan=0f
     private var previousAngle=0f
     private var count=0
-    init{preview.setOnTouchListener{_,event->gesture(event)}}
+    private var handleScale=false
+    init{
+        preview.selection={selected}
+        preview.setOnTouchListener{_,event->gesture(event)}
+    }
     private fun toast(text:String){Toast.makeText(host,text,Toast.LENGTH_SHORT).show()}
     private fun prompt(title:String,initial:String="",apply:(String)->Unit){
         val text=EditText(host).apply{setSingleLine();setText(initial);filters=arrayOf(android.text.InputFilter.LengthFilter(100))}
@@ -29,7 +33,7 @@ class SceneEditor(private val host:Activity,private val scenes:Scenes,private va
                 if(i==list.size)prompt("場景名稱"){scenes.create(it)} else scenes.select(list[i])
             }.show()
     }
-    private fun add(v:Overlay){scenes.layers(scenes.active.layers+v);selected=v.id;toast("拖曳移動，雙指縮放及旋轉")}
+    private fun add(v:Overlay){scenes.layers(scenes.active.layers+v);selected=v.id;preview.invalidate();toast("拖曳移動，雙指縮放及旋轉")}
     fun media(uri:Uri,video:Boolean){
         try{
             host.contentResolver.takePersistableUriPermission(uri,Intent.FLAG_GRANT_READ_URI_PERMISSION)
@@ -63,7 +67,7 @@ class SceneEditor(private val host:Activity,private val scenes:Scenes,private va
         AlertDialog.Builder(host).setTitle(title(v)).setItems(opts.toTypedArray()){_,i->
             val rest=scenes.active.layers.filterNot{it.id==v.id}
             when(i){
-                0->{selected=v.id;toast(if(v.locked)"請先解除鎖定" else "拖曳移動，雙指縮放及旋轉")}
+                0->{selected=v.id;preview.invalidate();toast(if(v.locked)"請先解除鎖定" else "拖曳移動，雙指縮放及旋轉")}
                 1->modify(v.copy(locked=!v.locked))
                 2->scenes.layers(rest+v)
                 3->scenes.layers(listOf(v)+rest)
@@ -73,6 +77,13 @@ class SceneEditor(private val host:Activity,private val scenes:Scenes,private va
         }.show()
     }
     private fun gesture(e:MotionEvent):Boolean{
+        if(e.actionMasked==MotionEvent.ACTION_DOWN){
+            count=0
+            val handle=preview.onHandle(selected,e.x,e.y)
+            handleScale=handle
+            if(!handle)selected=preview.hit(e.x,e.y)
+            preview.invalidate()
+        }
         val layer=scenes.active.layers.firstOrNull{it.id==selected && !it.locked}?:return false
         if(e.actionMasked==MotionEvent.ACTION_UP || e.actionMasked==MotionEvent.ACTION_CANCEL){scenes.save();count=0;return true}
         val n=e.pointerCount.coerceAtMost(2)
@@ -80,11 +91,12 @@ class SceneEditor(private val host:Activity,private val scenes:Scenes,private va
         val y=if(n==1)e.y else (e.y+e.getY(1))/2
         val dx=if(n==2)e.getX(1)-e.x else 0f
         val dy=if(n==2)e.getY(1)-e.y else 0f
-        val span=hypot(dx,dy)
+        val span=if(n==1 && handleScale)hypot(x-layer.x*preview.width,y-layer.y*preview.height) else hypot(dx,dy)
         val angle=Math.toDegrees(atan2(dy,dx).toDouble()).toFloat()
         if(e.actionMasked==MotionEvent.ACTION_MOVE && count==n && preview.width>0 && preview.height>0){
-            val next=layer.copy(x=(layer.x+(x-previousX)/preview.width).coerceIn(0f,1f),y=(layer.y+(y-previousY)/preview.height).coerceIn(0f,1f),
-                width=(layer.width*(if(n==2 && previousSpan>1f)span/previousSpan else 1f)).coerceIn(.03f,2f),
+            val move=!(handleScale && n==1)
+            val next=layer.copy(x=if(!move)layer.x else (layer.x+(x-previousX)/preview.width).coerceIn(0f,1f),y=if(!move)layer.y else (layer.y+(y-previousY)/preview.height).coerceIn(0f,1f),
+                width=(layer.width*(if((n==2 || handleScale) && previousSpan>1f)span/previousSpan else 1f)).coerceIn(.03f,2f),
                 angle=if(n==2)(layer.angle+angle-previousAngle)%360f else layer.angle)
             scenes.layers(scenes.active.layers.map{if(it.id==layer.id)next else it},false)
         }

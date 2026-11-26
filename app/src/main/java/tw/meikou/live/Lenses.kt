@@ -16,7 +16,8 @@ data class Lens(val parent:String,val physical:String?,val focal:FloatArray,val 
 }
 fun inventory(m:CameraManager):List<Lens> = buildList{
     for(id in m.cameraIdList){
-        val parent=m.getCameraCharacteristics(id)
+        val parent=runCatching{m.getCameraCharacteristics(id)}.getOrNull()?:continue
+        if(parent[CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES]?.contains(CameraMetadata.REQUEST_AVAILABLE_CAPABILITIES_BACKWARD_COMPATIBLE)!=true)continue
         for(physical in listOf<String?>(null)+parent.physicalCameraIds.sorted()){
             val c=runCatching{m.getCameraCharacteristics(physical?:id)}.getOrNull()?:continue
             val map=c[CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP]?:continue
@@ -27,7 +28,7 @@ fun inventory(m:CameraManager):List<Lens> = buildList{
             add(Lens(id,physical,c[CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS]?:floatArrayOf(),c[CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE]?.width,sizes,rates,if(physical==null)zoom?.lower?:1f else 1f,if(physical==null)zoom?.upper?:1f else 1f,c[CameraCharacteristics.LENS_FACING]==CameraCharacteristics.LENS_FACING_FRONT,c[CameraCharacteristics.SENSOR_ORIENTATION]?:90))
         }
     }
-}.sortedBy{it.front}
+}.sortedWith(compareBy<Lens>{it.front}.thenBy{it.physical!=null}).distinctBy{it.physical?:it.parent}
 
 
 internal fun Lens.rotation(ctx:android.content.Context):Int {

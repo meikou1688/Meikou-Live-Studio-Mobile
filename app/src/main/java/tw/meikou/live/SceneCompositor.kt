@@ -180,10 +180,12 @@ class SceneCompositor(private val ctx:android.content.Context,private val width:
             draw(cameraProgram,GLES11Ext.GL_TEXTURE_EXTERNAL_OES,cameraTex,cameraUv,cameraTransform)
             glViewport(canvasViewport[0],canvasViewport[1],canvasViewport[2],canvasViewport[3])
             glEnable(GL_BLEND);glBlendFunc(GL_ONE,GL_ONE_MINUS_SRC_ALPHA)
+            val frames=if(record)null else mutableListOf<LayerFrame>()
             for((layer,img) in visible){
                 val w=layer.width*width;val h=w/img.aspect
                 val x=if(layer.kind=="ticker")((layer.x*width-time%600000*width/8000f)%(width+w)+(width+w))%(width+w)-w/2 else layer.x*width
                 val y=layer.y*height
+                frames?.add(LayerFrame(layer.id,x/width,y/height,w/width,h/height,layer.angle))
                 val angle=Math.toRadians(layer.angle.toDouble());val c=cos(angle).toFloat();val s=sin(angle).toFloat()
                 coords.position(0)
                 for(i in 0..3){val dx=square[2*i]*w/2;val dy=-square[2*i+1]*h/2
@@ -194,6 +196,7 @@ class SceneCompositor(private val ctx:android.content.Context,private val width:
             }
             if(record)EGLExt.eglPresentationTimeANDROID(display,window,source.timestamp)
             check(EGL14.eglSwapBuffers(display,window))
+            if(frames!=null)scenes.previewLayers=frames
         }
         if(encodeWindow!=EGL14.EGL_NO_SURFACE)output(encodeWindow,true)
         if(previewWindow!=EGL14.EGL_NO_SURFACE)output(previewWindow,false)

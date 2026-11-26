@@ -163,11 +163,15 @@ class Capture(private val ctx:Context, private val preview:Surface?, private val
                     c.createCaptureSession(android.hardware.camera2.params.SessionConfiguration(0,outputs,java.util.concurrent.Executor{handler.post(it)},callback))
                 }catch(e:Exception){fail()}
             }}
+            override fun onClosed(c:CameraDevice){synchronized(cameraLock){
+                if(c===closingForSwitch){closingForSwitch=null;if(!stopping.get())try{openCamera()}catch(e:Exception){fail()}}
+            }}
             override fun onError(c:CameraDevice,error:Int){c.close();if(generation==revision)fail()}
             override fun onDisconnected(c:CameraDevice){c.close();if(generation==revision)fail()}
         },handler)
     }
     private var revision=0
+    private var closingForSwitch:CameraDevice?=null
     private var baseline:CaptureRequest?=null
     private var builder:CaptureRequest.Builder?=null
     fun configure(value:CameraSettings){
@@ -198,9 +202,11 @@ class Capture(private val ctx:Context, private val preview:Surface?, private val
         Handler(camThread.looper).post{
             if(stopping.get())return@post
             synchronized(cameraLock){
-                revision++;session?.close();session=null;camera?.close();camera=null;builder=null
+                  revision++;session?.close();session=null;builder=null
                 lens=next;compositor?.lens=next;zoom=1f;exposureIndex=0;settings=CameraSettings()
-                try{openCamera()}catch(e:Exception){fail()}
+                  val old=camera;camera=null
+                  if(old!=null){closingForSwitch=old;old.close()}
+                  else if(closingForSwitch==null)try{openCamera()}catch(e:Exception){fail()}
             }
         }
     }

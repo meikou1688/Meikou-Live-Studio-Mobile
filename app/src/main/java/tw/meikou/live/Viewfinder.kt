@@ -9,7 +9,7 @@ import android.view.Surface
 
 /** Main-thread Camera2 preview. Completes handoff only after CameraDevice.onClosed. */
 class Viewfinder(private val ctx:Context,private val lens:Lens,private val surface:Surface,private val width:Int,private val height:Int,private val scenes:Scenes,private var settings:CameraSettings,
-                 private val failure:()->Unit, private val closed:()->Unit){
+                 private val observed:(String)->Unit,private val failure:()->Unit, private val closed:()->Unit){
     private var compositor:SceneCompositor?=null
     private var device:CameraDevice?=null
     private var session:CameraCaptureSession?=null
@@ -26,6 +26,23 @@ class Viewfinder(private val ctx:Context,private val lens:Lens,private val surfa
         settings=value;runCatching{repeatRequest()}.onFailure{failure();stop()}
     }
     private var ended=false
+    private var unmatched=0
+    private var lastLabel=""
+    private val results=object:CameraCaptureSession.CaptureCallback(){
+        override fun onCaptureCompleted(s:CameraCaptureSession,r:CaptureRequest,result:TotalCaptureResult){
+            if(stopRequested || s!==session)return
+            val active=result[CaptureResult.LOGICAL_MULTI_CAMERA_ACTIVE_PHYSICAL_ID]
+            val physical=result.physicalCameraResults[lens.physical]
+            if(lens.physical!=null && physical==null && active!=lens.physical){
+                if(++unmatched>=30){failure();stop()}
+                return
+            }
+            unmatched=0
+            val focal=(physical?:result)[CaptureResult.LENS_FOCAL_LENGTH]
+            val label="鏡頭 "+(lens.physical?:active?:lens.parent)+(focal?.let{" · %.1f mm".format(it)}?:"")
+            if(label!=lastLabel){lastLabel=label;observed(label)}
+        }
+    }
     private fun done(){if(!ended){ended=true;compositor?.close();closed()}}
     fun stop(){stopRequested=true;session?.close();device?.close()}
     fun zoom(value:Float){zoom=value;runCatching{repeatRequest()}.onFailure{failure();stop()}}
@@ -34,7 +51,7 @@ class Viewfinder(private val ctx:Context,private val lens:Lens,private val surfa
         baseline?.let{settings.applyTo(builder,it)}
         builder.set(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION,exposureIndex)
         if(lens.physical==null && lens.zoomMax>lens.zoomMin)builder.set(CaptureRequest.CONTROL_ZOOM_RATIO,zoom.coerceIn(lens.zoomMin,lens.zoomMax))
-        session?.setRepeatingRequest(builder.build(),null,null)
+        session?.setRepeatingRequest(builder.build(),results,null)
     }
     @SuppressLint("MissingPermission")
     fun start(){

@@ -45,6 +45,7 @@ class Studio:Activity(){
     private lateinit var status:TextView
     private lateinit var reading:TextView
     private lateinit var address:EditText
+    private lateinit var streamKey:EditText
     private lateinit var shortcuts:LinearLayout
     private lateinit var lenses:Spinner
     private lateinit var sizes:Spinner
@@ -64,20 +65,35 @@ class Studio:Activity(){
     private val outputStates=sortedMapOf<Int,String>()
     private val youtube by lazy { YouTubeChannel(this) { status.text=it } }
     private lateinit var editOutputs:Button
-    private fun destination(text:String):URI=URI(text.trim()).also{
-        require(it.scheme in listOf("rtmp","rtmps") && it.host!=null && it.rawPath.trim('/').contains('/') && !it.rawPath.endsWith('/') && it.userInfo==null && it.fragment==null)
+    private var extraFields=listOf<Pair<String,String>>()
+    private fun destinationField(hintText:String,hide:Boolean)=EditText(this).apply{
+        hint=hintText;setSingleLine();isSaveEnabled=false
+        importantForAutofill=View.IMPORTANT_FOR_AUTOFILL_NO
+        inputType=android.text.InputType.TYPE_CLASS_TEXT or (if(hide)android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD else android.text.InputType.TYPE_TEXT_VARIATION_URI)
     }
     private fun editDestinations(){
-        val field=EditText(this).apply{
-            inputType=android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
-            isSingleLine=false;minLines=3;isSaveEnabled=false;hint="每行一個完整推流網址";setText(additional.joinToString("\n"))
+        val form=LinearLayout(this).apply{orientation=1;setPadding(dp(12),0,dp(12),0)}
+        val rows=(0 until 5).map{i->
+            form.addView(TextView(this).apply{text="目的地 "+(i+2)})
+            val url=destinationField("伺服器網址或完整推流網址",false)
+            val key=destinationField("串流金鑰",true)
+            extraFields.getOrNull(i)?.let{url.setText(it.first);key.setText(it.second)}
+            form.addView(url);form.addView(key);url to key
         }
-        val dialog=AlertDialog.Builder(this).setTitle("新增同步推流目的地（最多五路）").setView(field).setPositiveButton("儲存",null).setNegativeButton("取消",null).create()
+        val dialog=AlertDialog.Builder(this).setTitle("額外串流目的地")
+            .setView(ScrollView(this).apply{addView(form)}).setPositiveButton("儲存",null).setNegativeButton("取消",null).create()
         dialog.show()
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener{
-            val urls=runCatching{field.text.lines().filter{it.isNotBlank()}.map(::destination).also{require(it.size<=5 && it.distinct().size==it.size)}}.getOrNull()
-            if(urls==null)field.error="請確認網址格式、數量及重複項目"
-            else{additional=urls;outputSummary.text="額外目的地："+urls.size;dialog.dismiss()}
+            val fields=mutableListOf<Pair<String,String>>()
+            val urls=mutableListOf<URI>()
+            for((url,key) in rows){
+                val server=url.text.toString().trim();val secret=key.text.toString().trim()
+                if(server.isEmpty() && secret.isEmpty())continue
+                val target=runCatching{streamDestination(server,secret)}.getOrNull()
+                if(target==null || target in urls){url.error="請確認網址、金鑰及重複目的地";url.requestFocus();return@setOnClickListener}
+                fields.add(server to secret);urls.add(target)
+            }
+            extraFields=fields;additional=urls;outputSummary.text="額外目的地："+urls.size;dialog.dismiss()
         }
     }
     private lateinit var saveLive:CheckBox
@@ -149,13 +165,20 @@ class Studio:Activity(){
         val old=finder
         if(old==null){afterClose=null;next?.invoke()}else old.stop()
     }
+    private fun fallback(l:Lens){
+        if(selected!=l)return
+        val main=(0 until lenses.count).firstOrNull{val item=lenses.getItemAtPosition(it) as Lens; !item.front && item.physical==null}?:return
+        if(lenses.getItemAtPosition(main)==l){status.text="主鏡頭無法啟動";return}
+        status.text="此鏡頭無法啟動，切回主鏡頭"
+        lenses.setSelection(main)
+    }
     private fun previewSelected(){
         if(ScreenService.running || !ready || !visible || capture!=null || finder!=null || !granted())return
         val l=selected?:return
         val size=l.sizes.minByOrNull{kotlin.math.abs(it.width-1280)}?:return
         val w=if(portrait)size.height else size.width
         val h=if(portrait)size.width else size.height
-        val view=Viewfinder(this,l,preview.holder.surface,w,h,scenes,settings,{if(visible)status.text="這個鏡頭的預覽組合無法啟動"},{
+        val view=Viewfinder(this,l,preview.holder.surface,w,h,scenes,settings,{reading.text=it},{if(visible)fallback(l)},{
             finder=null;val next=afterClose;afterClose=null;if(visible && ready)next?.invoke()
         })
         finder=view;view.exposure(exposureCompensation);view.start()
@@ -176,34 +199,46 @@ class Studio:Activity(){
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         val page=LinearLayout(this).apply{orientation=1;setBackgroundColor(color("#12131a"))}
         val bar=LinearLayout(this).apply{gravity=Gravity.CENTER_VERTICAL;setPadding(dp(12),0,dp(12),0)}
-        page.addView(bar,-1,dp(46))
+        page.addView(bar,-1,dp(36))
         val logo=ImageView(this).apply{
             setImageResource(resources.getIdentifier("wordmark","drawable",packageName))
             scaleType=ImageView.ScaleType.FIT_CENTER;contentDescription="Meikou Live Studio"
         }
-        bar.addView(logo,dp(158),dp(34))
+        bar.addView(logo,dp(if(portrait)80 else 115),dp(28))
         monitorName=TextView(this).apply{gravity=Gravity.CENTER_VERTICAL or Gravity.END;textSize=14f}
         bar.addView(monitorName,LinearLayout.LayoutParams(0,-1,1f))
-        val root=LinearLayout(this).apply{orientation=if(portrait)1 else 0}
+        val root=FrameLayout(this)
         page.addView(root,LinearLayout.LayoutParams(-1,0,1f))
         preview=SurfaceView(this)
         val frame=FrameLayout(this);monitorArea=frame;monitorState(false)
         frame.addView(preview,FrameLayout.LayoutParams(-1,-1,Gravity.CENTER))
+        val touch=LayerCanvas(this,scenes)
+        frame.addView(touch,FrameLayout.LayoutParams(-1,-1,Gravity.CENTER))
         frame.addOnLayoutChangeListener{_,left,top,right,bottom,_,_,_,_->
             val ratio=if(portrait)9f/16 else 16f/9
             val width=minOf(right-left,((bottom-top)*ratio).toInt())
             val height=(width/ratio).toInt()
             if(width>0 && (preview.layoutParams.width!=width || preview.layoutParams.height!=height))
-                preview.layoutParams=FrameLayout.LayoutParams(width,height,Gravity.CENTER)
+                { preview.layoutParams=FrameLayout.LayoutParams(width,height,Gravity.CENTER);touch.layoutParams=FrameLayout.LayoutParams(width,height,Gravity.CENTER) }
         }
-        root.addView(frame,if(portrait)LinearLayout.LayoutParams(-1,0,1.3f) else LinearLayout.LayoutParams(0,-1,1f))
+        root.addView(frame,FrameLayout.LayoutParams(-1,-1))
         page.setOnApplyWindowInsetsListener{v,insets->
             val padding=insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
             v.setPadding(padding.left,padding.top,padding.right,padding.bottom);insets
         }
         val controls=LinearLayout(this).apply{orientation=1;setBackgroundColor(color("#1c1e26"));setPadding(dp(10),0,dp(10),dp(4))}
-        val controlWidth=(resources.configuration.screenWidthDp*0.33).toInt().coerceIn(218,300)
-        root.addView(controls,if(portrait)LinearLayout.LayoutParams(-1,0,1f) else LinearLayout.LayoutParams(dp(controlWidth),-1))
+        val shade=View(this).apply{setBackgroundColor(0x55000000);visibility=View.INVISIBLE}
+        root.addView(shade,FrameLayout.LayoutParams(-1,-1))
+        root.addView(controls,FrameLayout.LayoutParams(dp(minOf(resources.configuration.screenWidthDp-24,300)),-1,Gravity.END))
+        controls.visibility=View.INVISIBLE
+        controls.isClickable=true
+        fun settingsOpen(open:Boolean){
+            val state=if(open)View.VISIBLE else View.INVISIBLE
+            controls.visibility=state;shade.visibility=state
+            if(!open)(getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager).hideSoftInputFromWindow(controls.windowToken,0)
+        }
+        shade.setOnClickListener{settingsOpen(false)}
+        controls.addView(Button(this).apply{text="完成設定";setOnClickListener{settingsOpen(false)}},-1,dp(44))
         val scroll=ScrollView(this)
         panel=LinearLayout(this).apply{orientation=1}
         scroll.addView(panel);controls.addView(scroll,LinearLayout.LayoutParams(-1,0,1f))
@@ -241,14 +276,18 @@ class Studio:Activity(){
             override fun onStopTrackingTouch(s:SeekBar){}
         })
         section("場景與素材")
-        sceneEditor=SceneEditor(this,scenes,preview){capture==null}
-        button("選擇或新增場景"){sceneEditor.chooseScene()}
-        button("編輯素材圖層"){sceneEditor.edit()}
+        sceneEditor=SceneEditor(this,scenes,touch){capture==null}
+        button("選擇或新增場景"){settingsOpen(false);sceneEditor.chooseScene()}
+        button("編輯素材圖層"){settingsOpen(false);sceneEditor.edit()}
         section("串流輸出")
-        address=EditText(this).apply{hint="RTMP／RTMPS 完整推流網址";setSingleLine();inputType=android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD;isSaveEnabled=false}
+        label("RTMP／RTMPS 伺服器網址")
+        address=destinationField("例如 rtmps://伺服器/live",false)
         address.background=box("#20222b","#3a3e4c",4)
         address.setPadding(dp(10),dp(6),dp(10),dp(6));address.textSize=14f
         panel.addView(address)
+        label("串流金鑰")
+        streamKey=destinationField("貼上金鑰；使用完整網址可留白",true)
+        panel.addView(streamKey)
         button("連結 YouTube 頻道"){
             if(capture!=null || waiting || ScreenService.running) status.text="請先結束直播或錄影，再連結 YouTube 頻道。"
             else youtube.connect()
@@ -263,15 +302,25 @@ class Studio:Activity(){
         val photo=button(ui("photo")){}
         photo.setOnClickListener{savePreviewPhoto(photo)}
         button(ui("diagnostics")){hardware()}
-        val transport=LinearLayout(this).apply{gravity=Gravity.CENTER;setPadding(0,dp(5),0,0)}
-        controls.addView(transport,-1,-2)
-        for(action in listOf(live,record)){
-            panel.removeView(action)
-            action.background=box(if(action==live)"#d7263d" else "#3a3e4c")
-            val params=LinearLayout.LayoutParams(0,dp(48),1f)
-            if(action==record)params.marginStart=dp(5)
-            transport.addView(action,params)
+        val transport=LinearLayout(this).apply{gravity=Gravity.CENTER_VERTICAL}
+        page.addView(transport,-1,dp(46))
+        fun quick(title:String,run:()->Unit){
+            transport.addView(Button(this).apply{text=title;textSize=13f;minWidth=0;setPadding(0,0,0,0);setOnClickListener{run()}},LinearLayout.LayoutParams(0,-1,1f))
         }
+        quick("鏡頭"){
+            val entries=(0 until lenses.count).map{lenses.getItemAtPosition(it) as Lens}
+            if(entries.isNotEmpty())choose("選擇鏡頭",entries.map{it.toString()}){lenses.setSelection(it)}
+        }
+        quick("素材"){sceneEditor.edit()}
+        quick("設定"){settingsOpen(controls.visibility!=View.VISIBLE)}
+        for(action in listOf(live,record)){
+            panel.removeView(action);action.textSize=13f;action.minWidth=0;action.setPadding(0,0,0,0)
+            action.background=box(if(action==live)"#d7263d" else "#3a3e4c")
+            transport.addView(action,LinearLayout.LayoutParams(0,-1,1f))
+        }
+        panel.removeView(status)
+        bar.addView(status,1,LinearLayout.LayoutParams(0,-2,2f))
+        status.maxLines=2;status.gravity=Gravity.CENTER
         lenses.onItemSelectedListener=object:AdapterView.OnItemSelectedListener{
             override fun onNothingSelected(v:AdapterView<*>?){}
             override fun onItemSelected(v:AdapterView<*>?,view:View?,i:Int,id:Long){
@@ -354,8 +403,8 @@ class Studio:Activity(){
         val size=sizes.selectedItem as? android.util.Size?:return
         val fps=rates.selectedItem as? Int?:return
         val p=Profile(if(portrait)size.height else size.width,if(portrait)size.width else size.height,fps,(bits.selectedItem as Int)*1000000,codecs.selectedItemPosition==1)
-        val uri=if(stream)runCatching{URI(address.text.toString().trim()).also{require(it.scheme in listOf("rtmp","rtmps") && it.host!=null && it.rawPath.trim('/').contains('/') && !it.rawPath.endsWith('/') && it.userInfo==null)}}.getOrNull() else null
-        if(stream && (uri==null || p.hevc)){status.text="直播請選用 H.264，並輸入含串流金鑰的完整網址。";return}
+        val uri=if(stream)runCatching{streamDestination(address.text.toString(),streamKey.text.toString())}.getOrNull() else null
+        if(stream && (uri==null || p.hevc)){status.text="直播請選用 H.264，並填寫伺服器網址及串流金鑰。";return}
         if(stream && uri in additional){status.text="主要與額外目的地重複";return}
         if(finder!=null){stopPreview{begin(stream)};return}
         outputStates.clear()
@@ -364,7 +413,7 @@ class Studio:Activity(){
         if(recordFile && folder==null){status.text="無法使用錄影資料夾";return}
         val file=if(!recordFile)null else File(folder,"Meikou-"+System.currentTimeMillis()+".mp4")
         ending=false;profile=p;status.text="正在啟動影音擷取"
-        listOf(rotateButton,editOutputs,saveLive,inputs,sizes,rates,bits,codecs,address).forEach{it.isEnabled=false}
+        listOf(rotateButton,editOutputs,saveLive,inputs,sizes,rates,bits,codecs,address,streamKey).forEach{it.isEnabled=false}
         live.isEnabled=stream;record.isEnabled=!stream
         if(stream)live.text=ui("stop_live") else record.text=ui("stop_record")
         capture=Capture(this,preview.holder.surface,p,scenes,l,devices.getOrNull(inputs.selectedItemPosition-1),zoomRatio(l,zoom.progress),exposureCompensation,settings,{s->runOnUiThread{reading.text=s}},uri,if(stream)additional else emptyList(),{index,value->runOnUiThread{
@@ -374,7 +423,7 @@ class Studio:Activity(){
             {ok,networkError,recorded->
                 val saved=if(recorded && file!=null)saveMovie(file) else null
                 runOnUiThread{capture=null;profile=null;monitorState(false)
-                listOf(rotateButton,editOutputs,saveLive,inputs,sizes,rates,bits,codecs,address,live,record).forEach{it.isEnabled=true}
+                listOf(rotateButton,editOutputs,saveLive,inputs,sizes,rates,bits,codecs,address,streamKey,live,record).forEach{it.isEnabled=true}
                 live.text=ui("go_live");record.text=ui("record");reading.text="已停止擷取"
                 status.text=when{
                     saved!=null && !ok->"傳輸中斷，已儲存 "+saved
@@ -395,7 +444,7 @@ class Studio:Activity(){
         if(ScreenService.running){startService(Intent(this,ScreenService::class.java).setAction(ScreenService.STOP));return}
         if(capture!=null || waiting || !granted()){status.text="請先停止相機直播或錄影，並允許麥克風權限";return}
         choose("螢幕分享",listOf("直播螢幕與麥克風","錄製螢幕與麥克風")){choice->
-            val url=if(choice==0)runCatching{destination(address.text.toString())}.getOrNull() else null
+            val url=if(choice==0)runCatching{streamDestination(address.text.toString(),streamKey.text.toString())}.getOrNull() else null
             if(choice==0 && (url==null || url in additional)){status.text="請先設定有效且不重複的推流網址";return@choose}
             val size=sizes.selectedItem as? android.util.Size ?:android.util.Size(1280,720)
             pendingScreen=Intent(this,ScreenService::class.java).apply{

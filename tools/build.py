@@ -20,7 +20,7 @@ def build():
     launcher=gradle/"bin"/("gradle.bat" if os.name=="nt" else "gradle")
     env["ANDROID_HOME"]=str(sdk)
     run(launcher,"-p",root,":app:assembleDebug","--console=plain")
-    apk=out/"Meikou-Live-Mobile-0.1.4.apk"
+    apk=out/"Meikou-Live-Mobile-0.1.5.apk"
     from sign_test_apk import sign_test_apk
     sign_test_apk(root/"app/build/outputs/apk/debug/app-debug.apk",apk)
     run(java,"-jar",bt/"lib/apksigner.jar","verify","--verbose",apk)
