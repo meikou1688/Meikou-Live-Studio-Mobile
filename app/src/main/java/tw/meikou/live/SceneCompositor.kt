@@ -309,7 +309,7 @@ class SceneCompositor(private val ctx:android.content.Context,private val width:
             check(EGL14.eglQuerySurface(display,window,EGL14.EGL_WIDTH,windowSize,0))
             check(EGL14.eglQuerySurface(display,window,EGL14.EGL_HEIGHT,windowSize,1))
             if(windowSize[0]<=0 || windowSize[1]<=0)return
-            CameraGeometry.fit(width,height,windowSize[0],windowSize[1],canvasViewport)
+            CameraGeometry.fit(width,height,windowSize[0],windowSize[1],canvasViewport,fill=!record && width>height)
             if(framebuffer==0)compose() else{
                 glClearColor(0f,0f,0f,1f);glClear(GL_COLOR_BUFFER_BIT)
                 glViewport(canvasViewport[0],canvasViewport[1],canvasViewport[2],canvasViewport[3])

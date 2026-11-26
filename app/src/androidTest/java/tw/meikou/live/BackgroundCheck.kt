@@ -100,6 +100,13 @@ class BackgroundCheck : Instrumentation() {
                     .set(activity,(1936..1940).map { java.net.URI("rtmp://127.0.0.1:"+it+"/live/integration") })
                 (field(activity,"backgroundLive") as CheckBox).isChecked=true }
             until { ui { (field(activity,"lenses") as Spinner).count>0 && field(activity,"finder")!=null } }
+            ui {
+                val preview=field(activity,"preview") as android.view.SurfaceView
+                val content=activity.findViewById<android.view.View>(android.R.id.content)
+                check(preview.width==content.width && preview.height==content.height){"橫式預覽未填滿內容區"}
+                val header=(field(activity,"monitorName") as TextView).parent as LinearLayout
+                check((0 until header.childCount).none{header.getChildAt(it) is ImageView}){"橫式預覽仍顯示品牌標誌"}
+            }
             val codecUnavailable=ui{
                 val sizes=field(activity,"sizes") as Spinner
                 val options=(0 until sizes.count).map{sizes.getItemAtPosition(it) as android.util.Size}

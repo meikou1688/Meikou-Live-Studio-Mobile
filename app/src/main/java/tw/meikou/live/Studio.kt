@@ -24,8 +24,10 @@ class Studio:Activity(){
     private lateinit var monitorName:TextView
     private fun monitorState(streaming:Boolean){
         val shade=if(streaming)"#ff4d5e" else "#2ecc71"
-        monitorArea.background=box("#000000",shade,4)
-        monitorArea.foreground=android.graphics.drawable.GradientDrawable().apply{setColor(Color.TRANSPARENT);setStroke(dp(2),color(shade))}
+        if(portrait){
+            monitorArea.background=box("#000000",shade,4)
+            monitorArea.foreground=android.graphics.drawable.GradientDrawable().apply{setColor(Color.TRANSPARENT);setStroke(dp(2),color(shade))}
+        }
         monitorName.text=if(streaming)"播出 PGM" else "預覽 PVW"
         monitorName.setTextColor(color(shade))
     }
@@ -243,14 +245,26 @@ class Studio:Activity(){
     }
     override fun onCreate(b:Bundle?){super.onCreate(b)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        if(!portrait){
+            window.setDecorFitsSystemWindows(false)
+            window.attributes=window.attributes.apply{
+                layoutInDisplayCutoutMode=WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+            }
+            window.insetsController?.apply{
+                systemBarsBehavior=WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                hide(WindowInsets.Type.systemBars())
+            }
+        }
         val page=LinearLayout(this).apply{orientation=1;setBackgroundColor(color("#12131a"))}
         val bar=LinearLayout(this).apply{gravity=Gravity.CENTER_VERTICAL;setPadding(dp(12),0,dp(12),0)}
-        page.addView(bar,-1,dp(36))
-        val logo=ImageView(this).apply{
-            setImageResource(resources.getIdentifier("wordmark","drawable",packageName))
-            scaleType=ImageView.ScaleType.FIT_CENTER;contentDescription="Meikou Live Studio"
+        if(portrait){
+            page.addView(bar,-1,dp(36))
+            val logo=ImageView(this).apply{
+                setImageResource(resources.getIdentifier("wordmark","drawable",packageName))
+                scaleType=ImageView.ScaleType.FIT_CENTER;contentDescription="Meikou Live Studio"
+            }
+            bar.addView(logo,dp(80),dp(28))
         }
-        bar.addView(logo,dp(if(portrait)80 else 115),dp(28))
         monitorName=TextView(this).apply{gravity=Gravity.CENTER_VERTICAL or Gravity.END;textSize=14f}
         bar.addView(monitorName,LinearLayout.LayoutParams(0,-1,1f))
         val root=FrameLayout(this)
@@ -260,22 +274,35 @@ class Studio:Activity(){
         frame.addView(preview,FrameLayout.LayoutParams(-1,-1,Gravity.CENTER))
         val touch=LayerCanvas(this,scenes)
         frame.addView(touch,FrameLayout.LayoutParams(-1,-1,Gravity.CENTER))
+        val viewport=IntArray(4)
         frame.addOnLayoutChangeListener{_,left,top,right,bottom,_,_,_,_->
-            val ratio=if(portrait)9f/16 else 16f/9
-            val width=minOf(right-left,((bottom-top)*ratio).toInt())
-            val height=(width/ratio).toInt()
-            if(width>0 && (preview.layoutParams.width!=width || preview.layoutParams.height!=height))
-                { preview.layoutParams=FrameLayout.LayoutParams(width,height,Gravity.CENTER);touch.layoutParams=FrameLayout.LayoutParams(width,height,Gravity.CENTER) }
+            if(right>left && bottom>top){
+                val landscape=!portrait
+                CameraGeometry.fit(if(landscape)16 else 9,if(landscape)9 else 16,right-left,bottom-top,viewport,fill=landscape)
+                val width=viewport[2]
+                val height=viewport[3]
+                if(touch.layoutParams.width!=width || touch.layoutParams.height!=height){
+                    touch.layoutParams=FrameLayout.LayoutParams(width,height,Gravity.CENTER)
+                    if(!landscape)preview.layoutParams=FrameLayout.LayoutParams(width,height,Gravity.CENTER)
+                }
+            }
         }
         root.addView(frame,FrameLayout.LayoutParams(-1,-1))
+        if(!portrait)root.addView(bar,FrameLayout.LayoutParams(-1,dp(36),Gravity.TOP))
         page.setOnApplyWindowInsetsListener{v,insets->
             val padding=insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
-            v.setPadding(padding.left,padding.top,padding.right,padding.bottom);insets
+            if(portrait)v.setPadding(padding.left,padding.top,padding.right,padding.bottom)
+            insets
         }
         val controls=LinearLayout(this).apply{orientation=1;setBackgroundColor(color("#1c1e26"));setPadding(dp(10),0,dp(10),dp(4))}
         val shade=View(this).apply{setBackgroundColor(0x55000000);visibility=View.INVISIBLE}
         root.addView(shade,FrameLayout.LayoutParams(-1,-1))
         root.addView(controls,FrameLayout.LayoutParams(dp(minOf(resources.configuration.screenWidthDp-24,300)),-1,Gravity.END))
+        if(!portrait)controls.setOnApplyWindowInsetsListener{v,insets->
+            val cutout=insets.getInsets(WindowInsets.Type.displayCutout())
+            v.setPadding(dp(10)+cutout.left,cutout.top,dp(10)+cutout.right,dp(4)+cutout.bottom)
+            insets
+        }
         controls.visibility=View.INVISIBLE
         controls.isClickable=true
         fun settingsOpen(open:Boolean){
@@ -365,7 +392,15 @@ class Studio:Activity(){
         val photo=button(ui("photo")){}
         photo.setOnClickListener{savePreviewPhoto(photo)}
         button(ui("diagnostics")){hardware()}
-        page.addView(transport,-1,dp(46))
+        if(portrait)page.addView(transport,-1,dp(46))
+        else{
+            root.addView(transport,2,FrameLayout.LayoutParams(-2,dp(46),Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL))
+            bar.setOnApplyWindowInsetsListener{v,insets->
+                val cutout=insets.getInsets(WindowInsets.Type.displayCutout())
+                v.setPadding(dp(12)+cutout.left,0,dp(12)+cutout.right,0)
+                insets
+            }
+        }
         fun quick(title:String,run:()->Unit){
             transport.addView(Button(this).apply{text=title;textSize=13f;minWidth=0;setPadding(0,0,0,0);setOnClickListener{run()}},LinearLayout.LayoutParams(dp(72),dp(44)))
         }
@@ -389,7 +424,7 @@ class Studio:Activity(){
             transport.addView(action,LinearLayout.LayoutParams(dp(92),dp(44)))
         }
         panel.removeView(status)
-        bar.addView(status,1,LinearLayout.LayoutParams(0,-2,2f))
+        bar.addView(status,if(portrait)1 else 0,LinearLayout.LayoutParams(0,-2,2f))
         status.maxLines=2;status.gravity=Gravity.CENTER
         codecs.onItemSelectedListener=object:AdapterView.OnItemSelectedListener{
             override fun onNothingSelected(v:AdapterView<*>?){}

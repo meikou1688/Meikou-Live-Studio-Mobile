@@ -18,10 +18,12 @@ internal object CameraGeometry {
         out[15] = 1f
     }
 
-    fun fit(srcW: Int, srcH: Int, dstW: Int, dstH: Int, viewport: IntArray) {
-        val scale = min(dstW.toDouble() / srcW, dstH.toDouble() / srcH)
-        val w = (srcW * scale).roundToInt().coerceIn(1, dstW)
-        val h = (srcH * scale).roundToInt().coerceIn(1, dstH)
+    fun fit(srcW: Int, srcH: Int, dstW: Int, dstH: Int, viewport: IntArray, fill: Boolean = false) {
+        val horizontal = dstW.toDouble() / srcW
+        val vertical = dstH.toDouble() / srcH
+        val scale = if (fill) maxOf(horizontal, vertical) else min(horizontal, vertical)
+        val w = (srcW * scale).roundToInt().coerceAtLeast(1)
+        val h = (srcH * scale).roundToInt().coerceAtLeast(1)
         viewport[0] = (dstW - w) / 2
         viewport[1] = (dstH - h) / 2
         viewport[2] = w
