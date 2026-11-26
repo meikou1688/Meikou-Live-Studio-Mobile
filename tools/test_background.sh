@@ -38,6 +38,26 @@ fi
 trap 'kill "$receiver" "${extra_receivers[@]}" 2>/dev/null || true' EXIT
 sleep 1
 adb shell am instrument -w -e protocol "$protocol" tw.meikou.live.test/tw.meikou.live.BackgroundCheck | tee build/instrumentation.txt
+if grep -q 'MEIKOU_CODEC_UNAVAILABLE hevc' build/instrumentation.txt; then
+    if [[ $protocol != srt-hevc ]]; then
+        echo "Only the optional HEVC hardware run may report an unavailable codec." >&2
+        exit 1
+    fi
+    kill "$receiver" 2>/dev/null || true
+    wait "$receiver" 2>/dev/null || true
+    python3 - <<'PY'
+import json
+from pathlib import Path
+Path("build/background-srt-hevc-results.json").write_text(json.dumps({
+    "hevc": {
+        "status": "not_supported",
+        "reason": "The Android emulator exposes no HEVC encoder and camera-size combination."
+    }
+}, indent=2))
+PY
+    echo "HEVC SRT hardware run recorded as unsupported on this emulator; no encoding claim was made."
+    exit 0
+fi
 if ! grep -q MEIKOU_BACKGROUND_OK build/instrumentation.txt; then
     adb logcat -d -s MeikouCapture:I MeikouRemote:W MediaCodec:E CCodec:E AndroidRuntime:E | tail -120
     cat build/receiver.log

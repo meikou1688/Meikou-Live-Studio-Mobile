@@ -100,13 +100,22 @@ class BackgroundCheck : Instrumentation() {
                     .set(activity,(1936..1940).map { java.net.URI("rtmp://127.0.0.1:"+it+"/live/integration") })
                 (field(activity,"backgroundLive") as CheckBox).isChecked=true }
             until { ui { (field(activity,"lenses") as Spinner).count>0 && field(activity,"finder")!=null } }
-            ui{
+            val codecUnavailable=ui{
                 val sizes=field(activity,"sizes") as Spinner
                 val options=(0 until sizes.count).map{sizes.getItemAtPosition(it) as android.util.Size}
                 android.util.Log.i("MeikouCapture","測試編碼器 "+(field(activity,"codecs") as Spinner).selectedItem+" 可選解析度 "+options)
-                check(options.isNotEmpty()){"此 Android 裝置未公開可用的鏡頭與編碼器組合"}
-                val compact=options.indexOfFirst{it.width in 640..960}
-                if(compact>=0)sizes.setSelection(compact)
+                if(hevc && options.isEmpty())true
+                else{
+                    check(options.isNotEmpty()){"此 Android 裝置未公開可用的鏡頭與編碼器組合"}
+                    val compact=options.indexOfFirst{it.width in 640..960}
+                    if(compact>=0)sizes.setSelection(compact)
+                    false
+                }
+            }
+            if(codecUnavailable){
+                result.putString("stream","MEIKOU_CODEC_UNAVAILABLE hevc")
+                finish(Activity.RESULT_OK,result)
+                return
             }
             until { ui { (field(activity,"rates") as Spinner).count>0 } }
             val method=activity.javaClass.getDeclaredMethod("remoteCommand",String::class.java,org.json.JSONObject::class.java).apply{isAccessible=true}
