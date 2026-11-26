@@ -2,6 +2,38 @@ package tw.meikou.live
 
 import java.nio.ByteBuffer
 
+/**
+ * Streaming linear resampler. Output sample m is placed at the exact rational source
+ * position m * inputRate / outputRate, so buffer boundaries cannot alter pitch.
+ */
+internal class PcmResampler(private val inputRate:Int,private val outputRate:Int=48000){
+    private var initialized=false
+    private var previous=0
+    private var inputIndex=0L
+    private var nextOutputNumerator=0L
+    init{require(inputRate>0 && outputRate>0)}
+    fun accept(sample:Int,emit:(Int)->Unit){
+        if(!initialized){
+            emit(sample)
+            previous=sample
+            inputIndex=1
+            nextOutputNumerator=inputRate.toLong()
+            initialized=true
+            return
+        }
+        val start=(inputIndex-1)*outputRate
+        val end=inputIndex*outputRate
+        while(nextOutputNumerator<=end){
+            val fraction=nextOutputNumerator-start
+            val value=previous.toLong()+(sample.toLong()-previous)*fraction/outputRate
+            emit(value.toInt())
+            nextOutputNumerator+=inputRate
+        }
+        previous=sample
+        inputIndex++
+    }
+}
+
 /** Preserve the byte count and timestamps of a muted microphone block. */
 internal fun silencePcm(buffer:ByteBuffer,count:Int){
     require(count in 0..buffer.capacity())

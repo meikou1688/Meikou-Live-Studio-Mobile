@@ -115,9 +115,7 @@ internal class MusicTrack(private val context:Context,private val report:(String
         private val encoding=if(format.containsKey(MediaFormat.KEY_PCM_ENCODING))format.getInteger(MediaFormat.KEY_PCM_ENCODING) else AudioFormat.ENCODING_PCM_16BIT
         private var block=ShortArray(1024)
         private var used=0
-        private var previous=0
-        private var initialized=false
-        private var phase=0L
+        private val resampler=PcmResampler(rate)
         init{require(rate>0 && channels>0 && encoding in listOf(AudioFormat.ENCODING_PCM_FLOAT,AudioFormat.ENCODING_PCM_16BIT))}
         private fun emit(sample:Int){
             block[used++]=sample.toShort()
@@ -131,10 +129,7 @@ internal class MusicTrack(private val context:Context,private val report:(String
                 var sum=0L
                 repeat(channels){sum+=if(encoding==AudioFormat.ENCODING_PCM_FLOAT)(bytes.float.coerceIn(-1f,1f)*32767).roundToInt() else bytes.short.toInt()}
                 val sample=(sum/channels).toInt()
-                if(!initialized){emit(sample);previous=sample;phase=rate.toLong();initialized=true;continue}
-                while(phase<=48000){emit((previous+(sample-previous)*phase/48000).toInt());phase+=rate}
-                phase-=48000
-                previous=sample
+                resampler.accept(sample,::emit)
             }
         }
     }

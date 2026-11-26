@@ -1,6 +1,8 @@
 package tw.meikou.live
 
 import java.nio.ByteBuffer
+import kotlin.math.PI
+import kotlin.math.sin
 
 fun main() {
     val block = ByteBuffer.allocateDirect(2048)
@@ -28,5 +30,13 @@ fun main() {
     scalePcm(levels,8,200)
     check((0..3).map{levels.getShort(it*2).toInt()}==listOf(32767,-32768,400,-20))
     check(runCatching{scalePcm(levels,8,201)}.isFailure)
-    println("PASS: PCM mute, independent levels, mixing, peak clipping and partial buffers")
+    val converted=ArrayList<Int>()
+    val resampler=PcmResampler(44100)
+    repeat(44100){index->
+        resampler.accept((sin(2*PI*997*index/44100)*16000).toInt(),converted::add)
+    }
+    check(converted.size in 47998..48000){"unexpected resampled length ${converted.size}"}
+    val crossings=(1 until converted.size).count{converted[it-1]<=0 && converted[it]>0}
+    check(crossings in 996..998){"resampling changed 997 Hz tone to $crossings crossings"}
+    println("PASS: PCM mute, levels, mixing, clipping, partial buffers and pitch-stable resampling")
 }
