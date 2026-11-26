@@ -129,18 +129,21 @@ class Capture(private val ctx:Context, private val preview:Surface?, private val
     }
     @SuppressLint("MissingPermission")
     private fun prepare(){
-        val mime=if(profile.hevc) MediaFormat.MIMETYPE_VIDEO_HEVC else MediaFormat.MIMETYPE_VIDEO_AVC
-        val vf=MediaFormat.createVideoFormat(mime,profile.width,profile.height).apply{
-            setInteger(MediaFormat.KEY_COLOR_FORMAT,MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
-            setInteger(MediaFormat.KEY_BIT_RATE,profile.bitrate);setInteger(MediaFormat.KEY_FRAME_RATE,profile.fps)
-            setInteger(MediaFormat.KEY_I_FRAME_INTERVAL,2)
-            if(!profile.hevc)setInteger(MediaFormat.KEY_PROFILE,MediaCodecInfo.CodecProfileLevel.AVCProfileBaseline)
+        val vf=profile.videoFormat()
+        val supported=VideoEncoders.forProfile(profile)
+        require(supported.isNotEmpty()){"此裝置沒有支援選定規格的編碼器"}
+        for(candidate in supported){
+            val encoder=runCatching{MediaCodec.createByCodecName(candidate.name)}.getOrNull()?:continue
+            var surface:Surface?=null
+            try{
+                encoder.configure(vf,null,null,MediaCodec.CONFIGURE_FLAG_ENCODE)
+                surface=encoder.createInputSurface()
+                encoder.start()
+                video=encoder;encoderSurface=surface
+                break
+            }catch(e:Exception){runCatching{surface?.release()};runCatching{encoder.release()}}
         }
-        val chosen=MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos.firstOrNull{
-            it.isEncoder && it.isHardwareAccelerated && it.supportedTypes.contains(mime) &&
-                runCatching{it.getCapabilitiesForType(mime).isFormatSupported(vf)}.getOrDefault(false)
-        }
-        video=(chosen?.let{MediaCodec.createByCodecName(it.name)} ?: MediaCodec.createEncoderByType(mime)).also{video=it;it.configure(vf,null,null,MediaCodec.CONFIGURE_FLAG_ENCODE);encoderSurface=it.createInputSurface();it.start()}
+        check(video!=null){"此裝置無法啟動所選編碼器"}
         val renderer=SceneCompositor(ctx,profile.width,profile.height,null,lens,encoderSurface!!,scenes){fail()}
         synchronized(this){compositor=renderer;renderer.monitorSurface(monitor)}
         val af=MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_AAC,48000,1).apply{
@@ -401,5 +404,30 @@ class Capture(private val ctx:Context, private val preview:Surface?, private val
                 }
                 writeTime=0;probeStart=now
             }
+    }
+}
+
+internal fun Profile.videoFormat():MediaFormat{
+    val mime=if(hevc)MediaFormat.MIMETYPE_VIDEO_HEVC else MediaFormat.MIMETYPE_VIDEO_AVC
+    return MediaFormat.createVideoFormat(mime,width,height).apply{
+        setInteger(MediaFormat.KEY_COLOR_FORMAT,MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
+        setInteger(MediaFormat.KEY_BIT_RATE,bitrate)
+        setInteger(MediaFormat.KEY_FRAME_RATE,fps)
+        setInteger(MediaFormat.KEY_I_FRAME_INTERVAL,2)
+        setInteger(MediaFormat.KEY_MAX_B_FRAMES,0)
+        if(!hevc)setInteger(MediaFormat.KEY_PROFILE,MediaCodecInfo.CodecProfileLevel.AVCProfileBaseline)
+    }
+}
+
+internal object VideoEncoders{
+    private val encoders by lazy{MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos.filter{it.isEncoder && !it.isAlias}.sortedByDescending{it.isHardwareAccelerated}}
+    private val cache=java.util.concurrent.ConcurrentHashMap<Profile,List<MediaCodecInfo>>()
+    fun forProfile(profile:Profile):List<MediaCodecInfo> = cache.getOrPut(profile){
+        val format=profile.videoFormat()
+        val mime=requireNotNull(format.getString(MediaFormat.KEY_MIME))
+        encoders.filter { info -> info.supportedTypes.contains(mime) && runCatching{
+            val caps=info.getCapabilitiesForType(mime)
+            caps.colorFormats.contains(MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface) && caps.isFormatSupported(format)
+        }.getOrDefault(false) }
     }
 }

@@ -355,6 +355,14 @@ class Studio:Activity(){
         panel.removeView(status)
         bar.addView(status,1,LinearLayout.LayoutParams(0,-2,2f))
         status.maxLines=2;status.gravity=Gravity.CENTER
+        codecs.onItemSelectedListener=object:AdapterView.OnItemSelectedListener{
+            override fun onNothingSelected(v:AdapterView<*>?){}
+            override fun onItemSelected(v:AdapterView<*>?,view:View?,i:Int,id:Long){if(profile==null)refreshSizes()}
+        }
+        rates.onItemSelectedListener=object:AdapterView.OnItemSelectedListener{
+            override fun onNothingSelected(v:AdapterView<*>?){}
+            override fun onItemSelected(v:AdapterView<*>?,view:View?,i:Int,id:Long){if(profile==null)refreshBitrates()}
+        }
         sizes.onItemSelectedListener=object:AdapterView.OnItemSelectedListener{
             override fun onNothingSelected(v:AdapterView<*>?){}
             override fun onItemSelected(v:AdapterView<*>?,view:View?,i:Int,id:Long){if(profile==null)refreshRates()}
@@ -370,8 +378,7 @@ class Studio:Activity(){
                 }
                 selected=next
                 exposureCompensation=0;settings=CameraSettings()
-                if(running==null){options(sizes,next.sizes);sizes.setSelection(next.sizes.indexOfFirst{it.width==1280}.coerceAtLeast(0))
-                    refreshRates()}
+                if(running==null)refreshSizes()
                 zoom.isEnabled=next.zoomMax>next.zoomMin;zoom.progress=(0..100).minByOrNull{kotlin.math.abs(zoomRatio(next,it)-1f)}?:0
                 zoomLabel.text="系統變焦 1.00×"
                 if(capture!=null)capture?.changeLens(next) else stopPreview{previewSelected()}
@@ -398,9 +405,33 @@ class Studio:Activity(){
     private fun <T> options(view:Spinner,items:List<T>){view.adapter=ArrayAdapter(this,android.R.layout.simple_spinner_dropdown_item,items)}
     private fun granted()=listOf(Manifest.permission.CAMERA,Manifest.permission.RECORD_AUDIO).all{checkSelfPermission(it)==PackageManager.PERMISSION_GRANTED}
     override fun onRequestPermissionsResult(r:Int,p:Array<String>,g:IntArray){super.onRequestPermissionsResult(r,p,g);if(r==705){status.text=if(g.firstOrNull()==PackageManager.PERMISSION_GRANTED)"已允許通知，可以開始直播" else "背景直播需要通知權限";return};if(granted())loadLenses()else status.text="請在系統設定允許使用相機與麥克風。"}
+    private val bitratePresets=listOf(1,2,4,6,8,12)
+    private fun supported(size:android.util.Size,fps:Int,mbps:Int):Boolean{
+        val p=Profile(if(portrait)size.height else size.width,if(portrait)size.width else size.height,
+            fps,mbps*1000000,codecs.selectedItemPosition==1)
+        return VideoEncoders.forProfile(p).isNotEmpty()
+    }
+    private fun refreshSizes(){
+        val lens=selected?:return
+        val available=lens.sizes.filter{size->lens.supportedRates[size].orEmpty().any{fps->bitratePresets.any{supported(size,fps,it)}}}
+        val previous=sizes.selectedItem
+        options(sizes,available)
+        if(available.isEmpty()){options(rates,emptyList<Int>());options(bits,emptyList<Int>());status.text="此鏡頭與編碼器沒有相容的輸出規格";return}
+        val index=available.indexOf(previous).takeIf{it>=0}?:available.indexOfFirst{it.width==1280}.coerceAtLeast(0)
+        sizes.setSelection(index)
+        refreshRates()
+    }
+    private fun refreshBitrates(){
+        val size=sizes.selectedItem as? android.util.Size?:return
+        val fps=rates.selectedItem as? Int?:return
+        val available=bitratePresets.filter{supported(size,fps,it)}
+        val previous=bits.selectedItem as? Int
+        options(bits,available)
+        if(available.isNotEmpty())bits.setSelection(available.indexOf(previous?.takeIf{it in available}?:4).coerceAtLeast(0))
+    }
     private fun refreshRates(){
         val size=sizes.selectedItem as? android.util.Size?:return
-        val available=selected?.supportedRates?.get(size).orEmpty()
+        val available=selected?.supportedRates?.get(size).orEmpty().filter{fps->bitratePresets.any{supported(size,fps,it)}}
         val previous=rates.selectedItem as? Int
         options(rates,available)
         if(available.isNotEmpty())rates.setSelection(available.indexOf(previous?.takeIf { it in available }?:30).coerceAtLeast(0))
@@ -448,7 +479,9 @@ class Studio:Activity(){
         val size=sizes.selectedItem as? android.util.Size?:return
         val fps=rates.selectedItem as? Int?:return
         if(fps !in l.supportedRates[size].orEmpty()){status.text="此鏡頭無法使用選取的解析度與影格率";return}
-        val p=Profile(if(portrait)size.height else size.width,if(portrait)size.width else size.height,fps,(bits.selectedItem as Int)*1000000,codecs.selectedItemPosition==1)
+        val mbps=bits.selectedItem as? Int?:return
+        if(!supported(size,fps,mbps)){status.text="此裝置不支援選取的編碼規格";return}
+        val p=Profile(if(portrait)size.height else size.width,if(portrait)size.width else size.height,fps,mbps*1000000,codecs.selectedItemPosition==1)
         val uri=if(stream)runCatching{primaryDestination(address.text.toString(),streamKey.text.toString())}.getOrNull() else null
         if(stream && uri==null){status.text="請檢查伺服器網址、串流金鑰或 SRT 串流識別碼。";return}
         if(stream && p.hevc && (uri?.scheme!="srt" || additional.isNotEmpty())){status.text="H.265 直播請使用單一 SRT 目的地";return}
