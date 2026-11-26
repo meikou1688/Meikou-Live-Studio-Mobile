@@ -37,6 +37,21 @@ recording=$(adb shell 'ls -t "/sdcard/Movies/Meikou Live/"Meikou-*.mp4' | head -
 adb pull "$recording" "build/$protocol-local.mp4"
 ffmpeg -v error -xerror -i "build/$protocol-local.mp4" -map 0:a -map 0:v -f null -
 ffmpeg -v error -xerror -i build/background.mkv -f null -
+ffmpeg -v error -y -ss 4 -i build/background.mkv -frames:v 1 build/overlay.png
+python3 - <<'PY'
+import cv2
+import numpy as np
+im=cv2.imread("build/overlay.png")
+value,points,_=cv2.QRCodeDetector().detectAndDecode(im)
+assert value=="Meikou-camera-check", "receiver could not read QR layer"
+quad=points[0]
+center=quad.mean(axis=0)/np.array([im.shape[1],im.shape[0]])
+edges=np.linalg.norm(quad-np.roll(quad,1,axis=0),axis=1)
+assert np.max(np.abs(center-[.62,.55]))<.03,center
+assert edges.max()/edges.min()<1.08,edges
+assert .17<edges.mean()/im.shape[1]<.27,edges
+print("Decoded receiver QR at",center,"edge lengths",edges)
+PY
 ffprobe -v error -show_streams -show_packets -show_entries stream=index,codec_name:packet=stream_index,pts_time -of json build/background.mkv >build/background-packets.json
 python3 - <<'PY'
 import json

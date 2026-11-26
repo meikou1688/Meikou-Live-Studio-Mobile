@@ -25,6 +25,30 @@ class BackgroundCheck : Instrumentation() {
             SystemClock.sleep(150)
         }
     }
+    private fun checkLandscapeEditing(activity:Activity){
+        val scenes=ui { (activity.javaClass.getDeclaredMethod("getScenes").apply{isAccessible=true}.invoke(activity) as Scenes) }
+        val editor=ui { field(activity,"sceneEditor") as SceneEditor }
+        val canvas=ui { editor.javaClass.getDeclaredField("preview").apply{isAccessible=true}.get(editor) as LayerCanvas }
+        ui {scenes.layers(listOf(Overlay(id="qr-test",kind="qr",value="Meikou-camera-check",x=.3f,y=.5f,width=.20f)))}
+        until { scenes.previewLayers.any{it.id=="qr-test"} }
+        fun drag(x:Float,y:Float,toX:Float,toY:Float){
+            ui{
+                val start=SystemClock.uptimeMillis()
+                for((index,action) in listOf(android.view.MotionEvent.ACTION_DOWN,android.view.MotionEvent.ACTION_MOVE,android.view.MotionEvent.ACTION_UP).withIndex()){
+                    val event=android.view.MotionEvent.obtain(start,start+index*16L,action,if(index==0)x else toX,if(index==0)y else toY,0)
+                    try{canvas.dispatchTouchEvent(event)}finally{event.recycle()}
+                }
+            }
+        }
+        val w=canvas.width.toFloat();val h=canvas.height.toFloat()
+        check(w>h)
+        drag(.30f*w,.50f*h,.62f*w,.55f*h)
+        until { scenes.previewLayers.singleOrNull()?.let{kotlin.math.abs(it.x-.62f)<.01f}==true }
+        val frame=scenes.previewLayers.single()
+        val dx=frame.width*w/2;val dy=frame.height*h/2
+        drag(frame.x*w+dx,frame.y*h+dy,frame.x*w+dx*1.5f,frame.y*h+dy*1.5f)
+        until { scenes.previewLayers.singleOrNull()?.let{kotlin.math.abs(it.width-.30f)<.015f}==true }
+    }
     override fun onStart(){
         val result=Bundle()
         try{
@@ -37,6 +61,7 @@ class BackgroundCheck : Instrumentation() {
                     .set(activity,(1936..1940).map { java.net.URI("rtmp://127.0.0.1:"+it+"/live/integration") })
                 (field(activity,"backgroundLive") as CheckBox).isChecked=true }
             until { ui { (field(activity,"rates") as Spinner).count>0 && field(activity,"finder")!=null } }
+            checkLandscapeEditing(activity)
             ui { (field(activity,"live") as Button).performClick() }
             until { ui { (field(activity,"status") as TextView).text.startsWith("直播中") } }
             SystemClock.sleep(2500)
