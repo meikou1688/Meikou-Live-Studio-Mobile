@@ -48,6 +48,15 @@ class BackgroundCheck : Instrumentation() {
         val dx=frame.width*w/2;val dy=frame.height*h/2
         drag(frame.x*w+dx,frame.y*h+dy,frame.x*w+dx*1.5f,frame.y*h+dy*1.5f)
         until { scenes.previewLayers.singleOrNull()?.let{kotlin.math.abs(it.width-.30f)<.015f}==true }
+        val slides=listOf(android.graphics.Color.RED,android.graphics.Color.BLUE).mapIndexed{index,color->
+            val file=java.io.File(targetContext.cacheDir,"slide-"+index+".png")
+            val bitmap=android.graphics.Bitmap.createBitmap(64,64,android.graphics.Bitmap.Config.ARGB_8888)
+            bitmap.eraseColor(color)
+            file.outputStream().use{check(bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG,100,it))}
+            bitmap.recycle()
+            android.net.Uri.fromFile(file).toString()
+        }
+        ui { scenes.layers(scenes.active.layers+Overlay(kind="slides",value="",x=.18f,y=.5f,width=.18f,items=slides,slideSeconds=2)) }
     }
     override fun onStart(){
         val result=Bundle()

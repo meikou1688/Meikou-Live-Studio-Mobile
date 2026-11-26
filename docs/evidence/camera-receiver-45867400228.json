@@ -1,0 +1,54 @@
+{
+  "run": "https://github.com/meikou1688/Meikou-Live-Studio-Mobile/actions/runs/45867400228",
+  "source_commit": "c42df420abbf041c099923c0ded45e95473ef8a7",
+  "environment": "Android 15 API 35 emulator, virtual camera and microphone",
+  "rtmp": {
+    "background.mkv": {
+      "video_seconds": 18.182,
+      "audio_seconds": 18.155,
+      "duration_difference": 0.027
+    },
+    "rtmp-local.mp4": {
+      "video_seconds": 18.351,
+      "audio_seconds": 18.325,
+      "duration_difference": 0.026
+    },
+    "lane-1936.mkv": {
+      "video_seconds": 18.182,
+      "audio_seconds": 18.155,
+      "duration_difference": 0.027
+    },
+    "lane-1937.mkv": {
+      "video_seconds": 18.182,
+      "audio_seconds": 18.155,
+      "duration_difference": 0.027
+    },
+    "lane-1938.mkv": {
+      "video_seconds": 18.182,
+      "audio_seconds": 18.155,
+      "duration_difference": 0.027
+    },
+    "lane-1939.mkv": {
+      "video_seconds": 18.182,
+      "audio_seconds": 18.155,
+      "duration_difference": 0.027
+    },
+    "lane-1940.mkv": {
+      "video_seconds": 18.182,
+      "audio_seconds": 18.155,
+      "duration_difference": 0.027
+    }
+  },
+  "srt": {
+    "background.mkv": {
+      "video_seconds": 16.672,
+      "audio_seconds": 16.641,
+      "duration_difference": 0.031
+    },
+    "srt-local.mp4": {
+      "video_seconds": 17.238,
+      "audio_seconds": 17.303,
+      "duration_difference": -0.064
+    }
+  }
+}

@@ -310,9 +310,10 @@ class Studio:Activity(){
         streamKey=destinationField("貼上金鑰；使用完整網址可留白",true)
         panel.addView(streamKey)
         button("YouTube 頻道與直播"){
-            if(capture!=null || waiting || ScreenService.running)status.text="請於開播前設定 YouTube 頻道"
-            else choose("YouTube 頻道與直播",listOf("連結頻道","預定直播與分享","建立排程並套用串流設定")){choice->
-                when(choice){0->youtube.connect();1->youtube.connect(true);2->youtube.plan()}
+            if(capture!=null && backgroundActive)youtube.connect(liveChat=true)
+            else if(capture!=null || waiting || ScreenService.running)status.text="請於開播前設定 YouTube；背景相機直播可開啟聊天室"
+            else choose("YouTube 頻道與直播",listOf("連結頻道","預定直播與分享","建立排程並套用串流設定","查看直播聊天室")){choice->
+                when(choice){0->youtube.connect();1->youtube.connect(true);2->youtube.plan();3->youtube.connect(liveChat=true)}
             }
         }
         editOutputs=button("管理多路推流"){editDestinations()}
@@ -555,6 +556,7 @@ class Studio:Activity(){
             }
             return
         }
+        if(requestCode in listOf(SceneEditor.PICK_SLIDES,SceneEditor.PICK_CLIPS) && resultCode==RESULT_OK && data!=null)sceneEditor.playlist(data,requestCode==SceneEditor.PICK_CLIPS)
         if(requestCode in listOf(SceneEditor.PICK,SceneEditor.PICK_VIDEO) && resultCode==RESULT_OK)data?.data?.let{sceneEditor.media(it,requestCode==SceneEditor.PICK_VIDEO)}
     }
     private fun savePreviewPhoto(button:Button){

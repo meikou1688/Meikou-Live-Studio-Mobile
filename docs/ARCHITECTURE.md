@@ -26,3 +26,5 @@ https://developer.android.com/reference/android/media/MediaCodec
 
 
 相機輸入尺寸與編碼解析度分開：Camera2 逐鏡頭列舉 SurfaceTexture 尺寸與影格最短時間，OpenGL ES 等比縮放至播出畫布。背景相機直播由具 camera 與 microphone 類型的前景服務提供通知；畫面卸離只移除 EGL 預覽視窗，保留編碼視窗。
+
+音訊以優先序執行緒讀取 PCM 並保留時間戳。合成器與麥克風共用單調時鐘。錄影及傳輸從有效關鍵影格開始，依影音兩軌都到達的時間交錯送出。同一批 Android 編碼資料可傳至 RTMP／RTMPS，或透過 RootEncoder SRT 模組傳送 MPEG-TS。

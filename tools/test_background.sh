@@ -55,6 +55,13 @@ assert np.max(np.abs(center-[.62,.55]))<.03,center
 assert edges.max()/edges.min()<1.08,edges
 assert .17<edges.mean()/im.shape[1]<.27,edges
 print("Decoded receiver QR at",center,"edge lengths",edges)
+import subprocess
+pixels=subprocess.check_output(["ffmpeg","-v","error","-i","build/background.mkv","-an","-vf",
+    "fps=2,crop=4:4:iw*0.18:ih*0.5,scale=1:1","-pix_fmt","rgb24","-f","rawvideo","-"])
+colors=np.frombuffer(pixels,dtype="uint8").reshape((-1,3)).astype(int)
+phases=[0 if r>b+80 else 1 for r,g,b in colors if max(r,b)>g+70 and abs(r-b)>80]
+assert len(phases)>10 and sum(a!=b for a,b in zip(phases,phases[1:]))>=3,"slide sequence missing at receiver"
+print("Decoded alternating image playlist at the receiver")
 PY
 ffprobe -v error -show_streams -show_packets -show_entries stream=index,codec_name:packet=stream_index,pts_time -of json build/background.mkv >build/background-packets.json
 python3 - <<'PY'

@@ -1,9 +1,5 @@
 name: Export verified build for local signing
 on:
-  workflow_run:
-    workflows: ["Android build and transport tests"]
-    types: [completed]
-    branches: [main]
   workflow_dispatch:
     inputs:
       run_id:
@@ -15,13 +11,12 @@ permissions:
   contents: write
 jobs:
   export:
-    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-latest
     steps:
       - name: Verify build provenance
         env:
           GH_TOKEN: ${{ github.token }}
-          RUN_ID: ${{ inputs.run_id || github.event.workflow_run.id }}
+          RUN_ID: ${{ inputs.run_id }}
         run: |
           [[ "$RUN_ID" =~ ^[0-9]+$ ]]
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID" |
@@ -30,7 +25,7 @@ jobs:
         with:
           name: android-build-and-transport
           github-token: ${{ github.token }}
-          run-id: ${{ inputs.run_id || github.event.workflow_run.id }}
+          run-id: ${{ inputs.run_id }}
       - name: Export content-addressed signing input
         env:
           GH_TOKEN: ${{ github.token }}

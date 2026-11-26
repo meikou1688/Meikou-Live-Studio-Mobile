@@ -1,6 +1,6 @@
 # Meikou Live Studio Mobile
 
-**首版驗收尚未通過。** 0.1.6 為跨廠牌技術驗證版本。Windows USB 安裝請執行 `tools/install-android.cmd`，手機亦可直接開啟 APK。請參閱[首版 Android 功能對照與驗收紀錄](docs/ANDROID-V1-PARITY.md)。
+**首版驗收尚未通過。** 0.1.6 為開發中的跨廠牌驗證版本，尚未對外封裝。Windows USB 安裝請執行 `tools/install-android.cmd`，手機亦可直接開啟 APK。請參閱[首版 Android 功能對照與驗收紀錄](docs/ANDROID-V1-PARITY.md)。
 
 
 適用於具備相機、支援 Android 11 以上的 Android 手機。鏡頭與影音支援程度依裝置公開能力而定。此次交付使用偵錯簽章。解壓版本備份即可取得 APK、完整原始碼與測試紀錄。

@@ -67,15 +67,49 @@ class SceneCompositor(private val ctx:android.content.Context,private val width:
             val player=android.media.MediaPlayer()
             val clip=Clip(tex,texture,surface,player)
             texture.setOnFrameAvailableListener({clip.pending=true},handler)
-            try{
-                player.setDataSource(ctx,android.net.Uri.parse(layer.value))
-                player.setSurface(surface);player.setVolume(0f,0f);player.isLooping=true
+            val items=if(layer.kind=="clips")layer.items else listOf(layer.value)
+            var index=0
+            fun prepareItem(){
+                try{
+                    player.reset()
+                    clip.prepared=false;clip.hasFrame=false
+                    player.setDataSource(ctx,android.net.Uri.parse(items[index]))
+                player.setSurface(surface);player.setVolume(0f,0f);player.isLooping=items.size==1
                 player.setOnPreparedListener{if(!closing && clips[layer.id]===clip){clip.prepared=true;it.start()}}
                 player.setOnErrorListener{_,_,_->clip.failed=true;true}
-                player.prepareAsync()
-            }catch(e:Exception){clip.failed=true}
+                    player.setOnCompletionListener{
+                        if(!closing && clips[layer.id]===clip){index=(index+1)%items.size;prepareItem()}
+                    }
+                    player.prepareAsync()
+                }catch(e:Exception){clip.failed=true}
+            }
+            if(items.isNotEmpty())prepareItem()
             clip
         }
+    }
+    private data class Slides(val start:Long,var uri:String="")
+    private val slides=mutableMapOf<String,Slides>()
+    private val imageLoader=java.util.concurrent.Executors.newSingleThreadExecutor()
+    private fun slide(layer:Overlay,time:Long):Sprite?{
+        if(layer.items.isEmpty())return null
+        val state=slides.getOrPut(layer.id){Slides(time)}
+        val index=((time-state.start)/(layer.slideSeconds.coerceAtLeast(1)*1000L)%layer.items.size).toInt()
+        val uri=layer.items[index]
+        if(state.uri!=uri){
+            state.uri=uri
+            imageLoader.execute{
+                val bitmap=runCatching{scenes.decode(android.net.Uri.parse(uri))}.getOrNull()
+                if(bitmap!=null){
+                    if(!handler.post {
+                        try{
+                            if(!closing && slides[layer.id]===state && state.uri==uri)
+                                sprite(layer.copy(kind="image",value=uri,bitmap=bitmap))
+                        }finally{bitmap.recycle()}
+                    })bitmap.recycle()
+                }
+            }
+        }
+        return sprites[layer.id]
     }
     private val sprites=mutableMapOf<String,Sprite>()
     private val date=SimpleDateFormat("yyyy/MM/dd",Locale.TAIWAN)
@@ -174,10 +208,12 @@ class SceneCompositor(private val ctx:android.content.Context,private val width:
         val layers=scenes.active.layers
         val iter=sprites.iterator();while(iter.hasNext()){val e=iter.next();if(layers.none{it.id==e.key}){glDeleteTextures(1,intArrayOf(e.value.tex),0);iter.remove()}}
         val time=SystemClock.elapsedRealtime()
+        slides.keys.retainAll(layers.filter{it.kind=="slides"}.map{it.id}.toSet())
         val obsolete=clips.keys.filter{id->layers.none{it.id==id}}
         obsolete.forEach{clips.remove(it)?.close()}
         val visible=layers.mapNotNull{layer->
-            if(layer.kind!="video")sprite(layer)?.let{layer to it}
+            if(layer.kind=="slides")slide(layer,time)?.let{layer to it}
+            else if(layer.kind!="video" && layer.kind!="clips")sprite(layer)?.let{layer to it}
             else{
                 val clip=clip(layer)
                 if(clip.pending && !clip.failed){
@@ -215,7 +251,7 @@ class SceneCompositor(private val ctx:android.content.Context,private val width:
                 for(i in 0..3){val dx=square[2*i]*w/2;val dy=-square[2*i+1]*h/2
                     coords.put(2*(x+c*dx-s*dy)/width-1);coords.put(1-2*(y+s*dx+c*dy)/height)}
                 coords.position(0)
-                if(layer.kind=="video")draw(cameraProgram,GLES11Ext.GL_TEXTURE_EXTERNAL_OES,img.tex,cameraUv,clips.getValue(layer.id).transform)
+                if(layer.kind=="video" || layer.kind=="clips")draw(cameraProgram,GLES11Ext.GL_TEXTURE_EXTERNAL_OES,img.tex,cameraUv,clips.getValue(layer.id).transform)
                 else draw(layerProgram,GL_TEXTURE_2D,img.tex,layerUv,identity)
             }
             if(record)EGLExt.eglPresentationTimeANDROID(display,window,System.nanoTime()-captureEpochNs)
@@ -244,6 +280,7 @@ class SceneCompositor(private val ctx:android.content.Context,private val width:
     fun close(){
         if(closing)return
         closing=true
+        imageLoader.shutdownNow()
         try{onWorker{
             clips.values.forEach{it.close()};clips.clear()
             if(::source.isInitialized){source.setOnFrameAvailableListener(null);source.release()}

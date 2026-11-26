@@ -13,6 +13,8 @@ def backup(destination):
     files.append((apk,apk.name))
     evidence=out/"transport-results.json"
     if evidence.exists():files.append((evidence,"evidence/transport-results.json"))
+    camera=root/"docs/evidence/camera-receiver-45867400228.json"
+    if camera.exists():files.append((camera,"evidence/camera-receiver-results.json"))
     with zipfile.ZipFile(archive,"x",zipfile.ZIP_DEFLATED) as z:
         hashes={}
         for path,name in files:

@@ -19,6 +19,7 @@ internal class YouTubeChannel(private val activity: Activity, private val applyI
 
     private data class Draft(val title:String,val start:String,val privacy:String,val latency:String)
     private var draft:Draft?=null
+    private var chat=false
     private var schedule=false
     fun plan(){
         if(busy)return
@@ -42,10 +43,11 @@ internal class YouTubeChannel(private val activity: Activity, private val applyI
                 },now.year,now.monthValue-1,now.dayOfMonth).show()
             }.show()
     }
-    fun connect(upcoming:Boolean=false) {
+    fun connect(upcoming:Boolean=false,liveChat:Boolean=false) {
         if (busy) return
         busy = true
         schedule=upcoming
+        chat=liveChat
         show("正在向 Google 要求讀取 YouTube 頻道…")
         val request = AuthorizationRequest.builder()
             .setRequestedScopes(listOf(Scope(if(draft!=null)"https://www.googleapis.com/auth/youtube.force-ssl" else "https://www.googleapis.com/auth/youtube.readonly")))
@@ -85,6 +87,7 @@ internal class YouTubeChannel(private val activity: Activity, private val applyI
         Thread {
             val message = runCatching {
                 draft?.let{return@runCatching create(token,it)}
+                if(chat)return@runCatching openChat(token)
                 if(schedule)return@runCatching upcoming(token)
                 val url = URL("https://www.googleapis.com/youtube/v3/channels?part=snippet&mine=true")
                 val connection = url.openConnection() as HttpsURLConnection
@@ -140,6 +143,65 @@ internal class YouTubeChannel(private val activity: Activity, private val applyI
             activity.runOnUiThread{if(!activity.isFinishing && !activity.isDestroyed)applyIngest(address,key)}
             return "已建立排程並套用金鑰。手機開始傳送後，請在 YouTube 控制中心確認開播。"
         }catch(e:Exception){return "排程已建立，串流設定未完成。請在 YouTube 控制中心檢查這場直播。"}
+    }
+
+    private fun openChat(token:String):String{
+        val rooms=mutableListOf<Pair<String,String>>()
+        var next=""
+        do{
+            val response=api(token,"liveBroadcasts?part=snippet&broadcastStatus=active&broadcastType=all&maxResults=50"+next)
+            val items=response.getJSONArray("items")
+            for(index in 0 until items.length()){
+                val snippet=items.getJSONObject(index).getJSONObject("snippet")
+                val room=snippet.optString("liveChatId")
+                if(room.isNotBlank())rooms.add(snippet.getString("title") to room)
+            }
+            next=response.optString("nextPageToken").let{if(it.isBlank())"" else "&pageToken="+android.net.Uri.encode(it)}
+        }while(next.isNotEmpty())
+        if(rooms.isEmpty())return "此頻道目前沒有已開放的直播聊天室"
+        activity.runOnUiThread{
+            if(!activity.isFinishing && !activity.isDestroyed)android.app.AlertDialog.Builder(activity)
+                .setTitle("選擇直播聊天室").setItems(rooms.map{it.first}.toTypedArray()){_,index->
+                    chatDialog(token,rooms[index].first,rooms[index].second)
+                }.setNegativeButton("關閉",null).show()
+        }
+        return "已讀取直播聊天室"
+    }
+    private fun chatDialog(token:String,title:String,room:String){
+        val view=android.widget.TextView(activity).apply{setPadding(18,12,18,12);text="正在讀取留言"}
+        val scroll=android.widget.ScrollView(activity).apply{addView(view)}
+        val dialog=android.app.AlertDialog.Builder(activity).setTitle(title).setView(scroll).setNegativeButton("關閉",null).create()
+        val stopped=java.util.concurrent.atomic.AtomicBoolean()
+        val thread=Thread{
+            val messages=java.util.LinkedHashMap<String,String>()
+            var page=""
+            try{
+                while(!stopped.get() && !activity.isDestroyed && !activity.isFinishing){
+                    val response=api(token,"liveChat/messages?part=snippet,authorDetails&maxResults=200&liveChatId="+android.net.Uri.encode(room)+page)
+                    val list=response.getJSONArray("items")
+                    for(index in 0 until list.length()){
+                        val item=list.getJSONObject(index)
+                        val body=item.getJSONObject("snippet")
+                        val id=item.getString("id")
+                        val deleted=body.optJSONObject("messageDeletedDetails")?.optString("deletedMessageId")
+                        if(!deleted.isNullOrBlank()){messages.remove(deleted);continue}
+                        val message=body.optString("displayMessage")
+                        if(message.isNotBlank())messages[id]=item.optJSONObject("authorDetails")?.optString("displayName").orEmpty()+"　"+message
+                    }
+                    while(messages.size>100){val iter=messages.keys.iterator();iter.next();iter.remove()}
+                    val contents=messages.values.joinToString("\n").ifEmpty{"等待觀眾留言"}
+                    activity.runOnUiThread{if(dialog.isShowing){view.text=contents;scroll.post{scroll.fullScroll(android.view.View.FOCUS_DOWN)}}}
+                    val cursor=response.optString("nextPageToken")
+                    if(cursor.isEmpty())break
+                    page="&pageToken="+android.net.Uri.encode(cursor)
+                    Thread.sleep(response.optLong("pollingIntervalMillis",5000).coerceAtLeast(1000))
+                }
+            }catch(_:InterruptedException){}catch(_:Exception){
+                activity.runOnUiThread{if(dialog.isShowing)view.append("\n聊天室已中斷，請關閉後重新連線")}
+            }
+        }
+        dialog.setOnDismissListener{stopped.set(true);thread.interrupt()}
+        dialog.show();thread.start()
     }
 
     private fun upcoming(token:String):String {
