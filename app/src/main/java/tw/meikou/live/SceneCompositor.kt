@@ -19,6 +19,7 @@ class SceneCompositor(private val ctx:android.content.Context,private val width:
     private var display=EGL14.EGL_NO_DISPLAY
     private var context=EGL14.EGL_NO_CONTEXT
     private var previewWindow=EGL14.EGL_NO_SURFACE
+    @Volatile var captureEpochNs=0L
     private var lastRotation=initialLens?.rotation(ctx)?:0
     private var windowConfig:EGLConfig?=null
     private var encodeWindow=EGL14.EGL_NO_SURFACE
@@ -217,11 +218,11 @@ class SceneCompositor(private val ctx:android.content.Context,private val width:
                 if(layer.kind=="video")draw(cameraProgram,GLES11Ext.GL_TEXTURE_EXTERNAL_OES,img.tex,cameraUv,clips.getValue(layer.id).transform)
                 else draw(layerProgram,GL_TEXTURE_2D,img.tex,layerUv,identity)
             }
-            if(record)EGLExt.eglPresentationTimeANDROID(display,window,source.timestamp)
+            if(record)EGLExt.eglPresentationTimeANDROID(display,window,System.nanoTime()-captureEpochNs)
             check(EGL14.eglSwapBuffers(display,window))
             if(frames!=null)scenes.previewLayers=frames
         }
-        if(encodeWindow!=EGL14.EGL_NO_SURFACE)output(encodeWindow,true)
+        if(encodeWindow!=EGL14.EGL_NO_SURFACE && captureEpochNs!=0L)output(encodeWindow,true)
         if(previewWindow!=EGL14.EGL_NO_SURFACE){
             if(encoder==null)output(previewWindow,false)
             else try{output(previewWindow,false)}catch(e:IllegalStateException){

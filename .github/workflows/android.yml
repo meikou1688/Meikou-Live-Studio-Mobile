@@ -66,4 +66,5 @@ jobs:
           path: |
             build/instrumentation.txt
             build/background*results.json
+            build/lane-*.json
             build/receiver.log

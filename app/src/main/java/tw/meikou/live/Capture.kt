@@ -56,7 +56,6 @@ class Capture(private val ctx:Context, private val preview:Surface?, private val
     private var probeStart=0L
     private var writeTime=0L
     private var stableWindows=0
-    private var videoOrigin=-1L
     private var startNs=0L
     private var audioOrigin=0L
     private var samples=0L
@@ -89,6 +88,7 @@ class Capture(private val ctx:Context, private val preview:Surface?, private val
                     mic!!.startRecording()
                     check(mic!!.recordingState==AudioRecord.RECORDSTATE_RECORDING)
                     audioOrigin=(System.nanoTime()-startNs)/1000
+                    compositor!!.captureEpochNs=startNs
                     while(!stopping.get()){feedMicrophone();drain(video!!,false);drain(audio!!,true)}
                 }
             }
@@ -281,8 +281,7 @@ class Capture(private val ctx:Context, private val preview:Surface?, private val
                 if(info.size>0 && info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG==0){
                     val b=c.getOutputBuffer(i)!!;b.position(info.offset);b.limit(info.offset+info.size)
                     val bytes=ByteArray(info.size);b.get(bytes)
-                    if(!a && videoOrigin<0)videoOrigin=info.presentationTimeUs-(System.nanoTime()-startNs)/1000
-                    val pts=(if(a)info.presentationTimeUs else info.presentationTimeUs-videoOrigin).coerceAtLeast(0)
+                    val pts=info.presentationTimeUs.coerceAtLeast(0)
                     val frame=Frame(a,pts,info.flags,bytes)
                     if(mux!=null){
                         if(muxStarted)writeRecording(frame)

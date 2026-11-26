@@ -32,6 +32,9 @@ class BackgroundCheck : Instrumentation() {
             val activity=startActivitySync(launch)
             ui { (field(activity,"address") as EditText).setText(if(srt)"srt://10.0.2.2:19001/integration" else "rtmp://127.0.0.1:1935/live")
                 (field(activity,"streamKey") as EditText).setText(if(srt)"" else "integration")
+                (field(activity,"saveLive") as CheckBox).isChecked=true
+                if(!srt)activity.javaClass.getDeclaredField("additional").apply{isAccessible=true}
+                    .set(activity,(1936..1940).map { java.net.URI("rtmp://127.0.0.1:"+it+"/live/integration") })
                 (field(activity,"backgroundLive") as CheckBox).isChecked=true }
             until { ui { (field(activity,"rates") as Spinner).count>0 && field(activity,"finder")!=null } }
             ui { (field(activity,"live") as Button).performClick() }

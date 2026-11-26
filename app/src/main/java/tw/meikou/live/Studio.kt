@@ -67,7 +67,7 @@ class Studio:Activity(){
     private var additional=listOf<URI>()
     private lateinit var outputSummary:TextView
     private val outputStates=sortedMapOf<Int,String>()
-    private val youtube by lazy { YouTubeChannel(this) { status.text=it } }
+    private val youtube by lazy { YouTubeChannel(this,{server,key->if(capture==null){address.setText(server);streamKey.setText(key)}}) { status.text=it } }
     private lateinit var editOutputs:Button
     private var extraFields=listOf<Pair<String,String>>()
     private fun destinationField(hintText:String,hide:Boolean)=EditText(this).apply{
@@ -309,13 +309,11 @@ class Studio:Activity(){
         label("串流金鑰")
         streamKey=destinationField("貼上金鑰；使用完整網址可留白",true)
         panel.addView(streamKey)
-        button("連結 YouTube 頻道"){
-            if(capture!=null || waiting || ScreenService.running) status.text="請先結束直播或錄影，再連結 YouTube 頻道。"
-            else youtube.connect()
-        }
-        button("YouTube 預定直播與分享"){
-            if(capture==null && !waiting && !ScreenService.running)youtube.connect(true)
-            else status.text="請在開播前查看直播排程"
+        button("YouTube 頻道與直播"){
+            if(capture!=null || waiting || ScreenService.running)status.text="請於開播前設定 YouTube 頻道"
+            else choose("YouTube 頻道與直播",listOf("連結頻道","預定直播與分享","建立排程並套用串流設定")){choice->
+                when(choice){0->youtube.connect();1->youtube.connect(true);2->youtube.plan()}
+            }
         }
         editOutputs=button("管理多路推流"){editDestinations()}
         outputSummary=label("額外目的地：0")

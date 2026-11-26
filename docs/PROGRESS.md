@@ -50,3 +50,5 @@ Android 版加入 Google Identity Services 授權流程，使用 youtube.readonl
 SRT 主動連線現已接至 RootEncoder 2.8.2 的 srt 與 common 模組，接受裝置實際編碼的 H.264 或 H.265 與 AAC。SRT 目的地須提供連接埠及串流識別碼，目前不接受加密參數。測試在模擬器經 UDP 發給獨立 FFmpeg SRT 接收端。上游版本 https://github.com/pedroSG94/RootEncoder/tree/2.8.2 ，授權隨 APK 放在 assets/licenses。
 
 加入日期、QR Code、比分板即時加減分；透過同一 OpenGL 畫布進入推流與錄影。螢幕分享新增可選的麥克風與內部音訊混音，來源 App 須允許 Android 擷取播放內容。此項與實體裝置收音仍待驗收。
+
+YouTube 可在手機選擇標題、當地日期時間、隱私與延遲；使用者按下建立後，要求管理權限，建立預定直播、專屬串流並綁定，RTMPS 金鑰僅置於記憶體。平台自動開播與自動結束關閉。尚未在真實頻道建立活動驗收。
