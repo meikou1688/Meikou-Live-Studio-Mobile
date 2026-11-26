@@ -250,10 +250,6 @@ class Studio:Activity(){
             window.attributes=window.attributes.apply{
                 layoutInDisplayCutoutMode=WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
             }
-            window.insetsController?.apply{
-                systemBarsBehavior=WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-                hide(WindowInsets.Type.systemBars())
-            }
         }
         val page=LinearLayout(this).apply{orientation=1;setBackgroundColor(color("#12131a"))}
         val bar=LinearLayout(this).apply{gravity=Gravity.CENTER_VERTICAL;setPadding(dp(12),0,dp(12),0)}
@@ -316,6 +312,12 @@ class Studio:Activity(){
         panel=LinearLayout(this).apply{orientation=1}
         scroll.addView(panel);controls.addView(scroll,LinearLayout.LayoutParams(-1,0,1f))
         setContentView(page)
+        if(!portrait){
+            window.decorView.windowInsetsController?.apply{
+                systemBarsBehavior=WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                hide(WindowInsets.Type.systemBars())
+            }
+        }
         status=label(ui("idle"));status.setTextColor(color("#e6e8ec"))
         netText=label("網路 · 檢查中");reading=label("尚未擷取")
         section("鏡頭控制")
