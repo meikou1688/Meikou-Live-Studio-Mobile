@@ -96,6 +96,16 @@ class BackgroundCheck : Instrumentation() {
                     .set(activity,(1936..1940).map { java.net.URI("rtmp://127.0.0.1:"+it+"/live/integration") })
                 (field(activity,"backgroundLive") as CheckBox).isChecked=true }
             until { ui { (field(activity,"rates") as Spinner).count>0 && field(activity,"finder")!=null } }
+            val method=activity.javaClass.getDeclaredMethod("remoteCommand",String::class.java,org.json.JSONObject::class.java).apply{isAccessible=true}
+            PeerServer.start(java.net.InetAddress.getByName("127.0.0.1") as java.net.Inet4Address){action,params->
+                ui{method.invoke(activity,action,params) as org.json.JSONObject}
+            }.use { peer->
+                val initial=PeerServer.send(peer.invitation,"status")
+                val scene=initial.getJSONArray("scenes").getJSONObject(0)
+                check(PeerServer.send(peer.invitation,"scene.activate",org.json.JSONObject().put("sceneId",scene.getString("id"))).getString("active")==scene.getString("name"))
+                check(PeerServer.send(peer.invitation,"audio.mute",org.json.JSONObject().put("muted",true)).getBoolean("muted"))
+                check(!PeerServer.send(peer.invitation,"audio.mute",org.json.JSONObject().put("muted",false)).getBoolean("muted"))
+            }
             checkLandscapeEditing(activity)
             ui { (field(activity,"live") as Button).performClick() }
             until { ui { (field(activity,"status") as TextView).text.startsWith("直播中") } }

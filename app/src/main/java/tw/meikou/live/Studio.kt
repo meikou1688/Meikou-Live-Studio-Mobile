@@ -36,6 +36,18 @@ class Studio:Activity(){
             setPadding(0,dp(14),0,dp(3))
         }
     }
+    private val remotePanel by lazy{RemotePanel(this,::remoteCommand)}
+    private fun remoteCommand(action:String,parameters:org.json.JSONObject):org.json.JSONObject{
+        when(action){
+            "status"->Unit
+            "scene.activate"->scenes.select(scenes.scenes().first{it.id==parameters.getString("sceneId")})
+            "audio.mute"->mute.isChecked=parameters.getBoolean("muted")
+            else->error("未知的遙控指令")
+        }
+        val entries=org.json.JSONArray()
+        scenes.scenes().forEach{entries.put(org.json.JSONObject().put("id",it.id).put("name",it.name))}
+        return org.json.JSONObject().put("scenes",entries).put("active",scenes.active.name).put("muted",mute.isChecked)
+    }
     private val scenes by lazy{Scenes(this)}
     private val portrait get()=resources.configuration.orientation==android.content.res.Configuration.ORIENTATION_PORTRAIT
     private lateinit var rotateButton:Button
@@ -325,6 +337,7 @@ class Studio:Activity(){
         panel.addView(backgroundLive)
         live=button(ui("go_live")){begin(true)}
         record=button(ui("record")){begin(false)}
+        button("手機遙控"){remotePanel.menu()}
         button("螢幕分享／錄影"){screenMenu()}
         val photo=button(ui("photo")){}
         photo.setOnClickListener{savePreviewPhoto(photo)}
@@ -630,6 +643,6 @@ class Studio:Activity(){
     }
     private val handlersForPhotos=Handler(Looper.getMainLooper())
     override fun onStop(){super.onStop();visible=false;stopPreview();cancelRetry();if(!backgroundActive){ending=true;capture?.stop()}else if(backgroundPreparing)CameraLiveService.stopSession?.invoke()}
-    override fun onDestroy(){if(backgroundActive)CameraLiveService.stopSession?.invoke();network.unregisterNetworkCallback(monitor);super.onDestroy()}
+    override fun onDestroy(){remotePanel.close();if(backgroundActive)CameraLiveService.stopSession?.invoke();network.unregisterNetworkCallback(monitor);super.onDestroy()}
 }
 

@@ -28,3 +28,7 @@ https://developer.android.com/reference/android/media/MediaCodec
 相機輸入尺寸與編碼解析度分開：Camera2 逐鏡頭列舉 SurfaceTexture 尺寸與影格最短時間，OpenGL ES 等比縮放至播出畫布。背景相機直播由具 camera 與 microphone 類型的前景服務提供通知；畫面卸離只移除 EGL 預覽視窗，保留編碼視窗。
 
 音訊以優先序執行緒讀取 PCM 並保留時間戳。合成器與麥克風共用單調時鐘。錄影及傳輸從有效關鍵影格開始，依影音兩軌都到達的時間交錯送出。同一批 Android 編碼資料可傳至 RTMP／RTMPS，或透過 RootEncoder SRT 模組傳送 MPEG-TS。
+
+### 區域網路遙控
+
+直播手機由使用者開啟遙控服務，綁定 Wi-Fi 或有線 IPv4 位址與臨時連接埠。導播手機貼上配對資料後，以 TLS 連線釘選憑證 SHA-256，並帶入本次隨機授權資料。每筆訊息包含 protocolVersion、requestId、command、parameters。可讀取狀態、切換場景及靜音。停止接受遙控即關閉服務；下次開啟會產生新的授權資料。此路徑不提供遠端自動開播。Android 端以程序間可使用的獨立 socket 驗證；不同手機的區域網路驗收須另行完成。
