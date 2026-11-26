@@ -14,7 +14,6 @@ import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
 
 data class Profile(val width:Int,val height:Int,val fps:Int,val bitrate:Int,val hevc:Boolean)
-private data class Frame(val audio:Boolean,val pts:Long,val flags:Int,val bytes:ByteArray)
 
 class Capture(private val ctx:Context, private val preview:Surface?, private val profile:Profile,private val scenes:Scenes,
               private var lens:Lens?, private val inputDevice:AudioDeviceInfo?, private val initialZoom:Float, private var exposureIndex:Int, private var settings:CameraSettings, private val telemetry:(String)->Unit, private val target:URI?, additional:List<URI>, outputStatus:(Int,String)->Unit, private val file:File?, private val notify:(Int)->Unit,
@@ -50,6 +49,7 @@ class Capture(private val ctx:Context, private val preview:Surface?, private val
     private var muxStarted=false
     private val tracks=IntArray(2){-1}
     private val pending=ArrayList<Frame>()
+    private val timeline=CaptureTimeline { video?.setParameters(Bundle().apply{putInt(MediaCodec.PARAMETER_KEY_REQUEST_SYNC_FRAME,0)}) }
     private var published=false
     private var onlineFailure=false
     private var currentBitrate=profile.bitrate
@@ -271,6 +271,7 @@ class Capture(private val ctx:Context, private val preview:Surface?, private val
                 val capturedUs=((System.nanoTime()-startNs)/1000-duration).coerceAtLeast(0)
                 // Preserve source gaps if the device delivers fewer samples than real time.
                 // Small scheduling fluctuations stay on the continuous PCM sample clock.
+                if(nextUs-capturedUs>65000)continue
                 if(nextUs==0L || capturedUs-nextUs>65000)nextUs=capturedUs
                 if(microphoneMuted.get())silencePcm(buffer,n)
                 playback?.let{
@@ -309,23 +310,29 @@ class Capture(private val ctx:Context, private val preview:Surface?, private val
                     val bytes=ByteArray(info.size);b.get(bytes)
                     val pts=info.presentationTimeUs.coerceAtLeast(0)
                     val frame=Frame(a,pts,info.flags,bytes)
-                    if(mux!=null){
-                        if(muxStarted)writeRecording(frame)
-                        else{require(pending.size<160);pending.add(frame)}
-                    }
-                    if(target!=null && !stopping.get()){
-                        try{srt?.send(a,bytes,pts,info.flags)}catch(e:java.io.IOException){onlineFailure=!stopping.get();throw e}
-                        if(client!=null || (!profile.hevc && additionalOutputs))writeNetwork(frame)
-                    }
-                    if(!stopping.get()){
-                        delivered[if(a)1 else 0]=true
-                        if(!published && srt?.sentBoth()!=false && delivered.all{it} && (mux==null || recorded.all{it})){
-                            published=true
-                            notify(if(target!=null)1 else 2)
-                        }
-                    }
+                    timeline.accept(frame,::deliver)
                 }
             }finally{c.releaseOutputBuffer(i,false)}
+        }
+    }
+    private fun deliver(frame:Frame){
+        val a=frame.audio
+        val bytes=frame.bytes
+        val pts=frame.pts
+        if(mux!=null){
+            if(muxStarted)writeRecording(frame)
+            else{require(pending.size<160);pending.add(frame)}
+        }
+        if(target!=null && !stopping.get()){
+            try{srt?.send(a,bytes,pts,frame.flags)}catch(e:java.io.IOException){onlineFailure=!stopping.get();throw e}
+            if(client!=null || (!profile.hevc && additionalOutputs))writeNetwork(frame)
+        }
+        if(!stopping.get()){
+            delivered[if(a)1 else 0]=true
+            if(!published && srt?.sentBoth()!=false && delivered.all{it} && (mux==null || recorded.all{it})){
+                published=true
+                notify(if(target!=null)1 else 2)
+            }
         }
     }
     private fun format(a:Boolean,f:MediaFormat){
