@@ -76,7 +76,12 @@ class BackgroundCheck : Instrumentation() {
         wav.writeBytes(pcm.array())
         ui { scenes.cameraEffect(1);scenes.layers(scenes.active.layers+listOf(
             Overlay(kind="slides",value="",x=.18f,y=.5f,width=.18f,items=slides,slideSeconds=2),
-            Overlay(kind="music",value="",items=listOf(android.net.Uri.fromFile(wav).toString()),volume=50))) }
+            Overlay(kind="clips",value="",items=listOf("lime.mp4","magenta.mp4").map{
+                android.net.Uri.fromFile(java.io.File(targetContext.getExternalFilesDir(null),it)).toString()
+            },x=.85f,y=.82f,width=.18f),
+            Overlay(kind="music",value="",items=listOf(wav,java.io.File(targetContext.getExternalFilesDir(null),"melody.m4a")).map{
+                android.net.Uri.fromFile(it).toString()
+            },volume=50))) }
     }
     override fun onStart(){
         val result=Bundle()

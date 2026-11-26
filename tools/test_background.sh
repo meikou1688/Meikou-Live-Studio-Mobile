@@ -10,6 +10,14 @@ adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
 for permission in CAMERA RECORD_AUDIO POST_NOTIFICATIONS; do
   adb shell pm grant tw.meikou.live "android.permission.$permission"
 done
+fixture_dir=/sdcard/Android/data/tw.meikou.live/files
+adb shell mkdir -p "$fixture_dir"
+for color in lime magenta; do
+    ffmpeg -v error -y -f lavfi -i "color=c=$color:s=160x96:r=12" -t 1.5 -c:v libx264 -pix_fmt yuv420p -movflags +faststart "build/$color.mp4"
+    adb push "build/$color.mp4" "$fixture_dir/$color.mp4"
+done
+ffmpeg -v error -y -f lavfi -i sine=frequency=997:sample_rate=44100 -ac 2 -t 1.5 -c:a aac build/melody.m4a
+adb push build/melody.m4a "$fixture_dir/melody.m4a"
 adb reverse tcp:1935 tcp:1935
 protocol=${1:-rtmp}
 listener=(-listen 1 -i rtmp://127.0.0.1:1935/live/integration)
@@ -69,6 +77,12 @@ colors=np.frombuffer(pixels,dtype="uint8").reshape((-1,3)).astype(int)
 phases=[0 if r>b+80 else 1 for r,g,b in colors if max(r,b)>g+70 and abs(r-b)>80]
 assert len(phases)>10 and sum(a!=b for a,b in zip(phases,phases[1:]))>=3,"slide sequence missing at receiver"
 print("Decoded alternating image playlist at the receiver")
+clip_pixels=subprocess.check_output(["ffmpeg","-v","error","-i","build/background.mkv","-an","-vf",
+    "fps=2,crop=4:4:iw*0.85:ih*0.82,scale=1:1","-pix_fmt","rgb24","-f","rawvideo","-"])
+clip_rgb=np.frombuffer(clip_pixels,dtype="uint8").reshape((-1,3)).astype(int)
+clip_states=[0 if g>r+60 else 1 for r,g,b in clip_rgb if (g>r+60 and g>b+60) or (r>g+60 and b>g+60)]
+assert len(clip_states)>10 and sum(a!=b for a,b in zip(clip_states,clip_states[1:]))>=3,"video playlist missing at receiver"
+print("Decoded both video clips repeating at the receiver")
 audio=subprocess.check_output(["ffmpeg","-v","error","-ss","4","-i","build/background.mkv","-t","1","-vn","-ar","48000","-ac","1","-f","s16le","-"])
 pcm=np.frombuffer(audio,dtype="<i2").astype(float)
 spectrum=np.abs(np.fft.rfft(pcm*np.hanning(len(pcm))))
