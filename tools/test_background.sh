@@ -38,7 +38,11 @@ fi
 trap 'kill "$receiver" "${extra_receivers[@]}" 2>/dev/null || true' EXIT
 sleep 1
 adb shell am instrument -w -e protocol "$protocol" tw.meikou.live.test/tw.meikou.live.BackgroundCheck | tee build/instrumentation.txt
-grep -q MEIKOU_BACKGROUND_OK build/instrumentation.txt
+if ! grep -q MEIKOU_BACKGROUND_OK build/instrumentation.txt; then
+    adb logcat -d -s MeikouCapture:W MediaCodec:E CCodec:E AndroidRuntime:E | tail -120
+    cat build/receiver.log
+    exit 1
+fi
 for _ in {1..20}; do kill -0 "$receiver" 2>/dev/null || break; sleep 0.5; done
 if [[ $protocol == rtmp ]]; then
     for port in {1936..1940}; do

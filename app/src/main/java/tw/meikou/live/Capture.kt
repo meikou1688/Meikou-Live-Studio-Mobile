@@ -98,7 +98,13 @@ class Capture(private val ctx:Context, private val preview:Surface?, private val
                     while(!stopping.get()){feedMicrophone();drain(video!!,false);drain(audio!!,true)}
                 }
             }
-        }catch(e:Exception){if(!stopping.get())bad.set(true)}
+         }catch(e:Exception){
+            if(!stopping.get()){
+                bad.set(true)
+                val site=e.stackTrace.firstOrNull{it.className.startsWith("tw.meikou.live")}
+                android.util.Log.w("MeikouCapture","擷取中止 "+e.javaClass.simpleName+" "+site?.className+"."+site?.methodName+"#"+site?.lineNumber)
+            }
+        }
         finally{
             stopping.set(true)
             synchronized(cameraLock){runCatching{session?.close()};runCatching{camera?.close()}}

@@ -117,7 +117,9 @@ class BackgroundCheck : Instrumentation() {
             until { ui { field(activity,"visible")==true && (field(activity,"ready")==true) } }
             SystemClock.sleep(2500)
             val manager=targetContext.getSystemService(NotificationManager::class.java)
-            manager.activeNotifications.first { it.id==12 }.notification.actions.first().actionIntent.send()
+            val notice=manager.activeNotifications.firstOrNull{it.id==12}
+            check(notice!=null){"背景通知消失，擷取狀態："+ui{(field(activity,"status") as TextView).text.toString()}}
+            notice.notification.actions.first().actionIntent.send()
             until { ui { field(activity,"capture")==null } && manager.activeNotifications.none { it.id==12 } }
             result.putString("stream","MEIKOU_BACKGROUND_OK")
             finish(Activity.RESULT_OK,result)
