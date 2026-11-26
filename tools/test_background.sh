@@ -13,7 +13,9 @@ done
 adb reverse tcp:1935 tcp:1935
 protocol=${1:-rtmp}
 listener=(-listen 1 -i rtmp://127.0.0.1:1935/live/integration)
-if [[ $protocol == srt ]]; then listener=(-i 'srt://0.0.0.0:19001?mode=listener&transtype=live'); fi
+export MEIKOU_EXPECT_VIDEO=h264
+if [[ $protocol == srt-hevc ]]; then MEIKOU_EXPECT_VIDEO=hevc; fi
+if [[ $protocol == srt* ]]; then listener=(-i 'srt://0.0.0.0:19001?mode=listener&transtype=live'); fi
 ffmpeg -nostdin -hide_banner -loglevel warning -y "${listener[@]}" -c copy build/background.mkv >build/receiver.log 2>&1 &
 receiver=$!
 trap 'kill "$receiver" 2>/dev/null || true' EXIT
@@ -86,7 +88,8 @@ for stream in data["streams"]:
     gap=max(b-a for a,b in zip(times,times[1:]))
     stats[stream["codec_name"]]={"seconds":span,"max_gap":gap,"packets":len(times)}
     assert span>=14 and gap<2,stats
-assert set(stats)=={"h264","aac"},stats
+import os
+assert set(stats)=={os.environ["MEIKOU_EXPECT_VIDEO"],"aac"},stats
 Path("build/background-results.json").write_text(json.dumps(stats,indent=2))
 print(stats)
 PY

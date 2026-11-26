@@ -61,6 +61,7 @@ jobs:
           script: |
             bash tools/test_background.sh rtmp
             bash tools/test_background.sh srt
+            bash tools/test_background.sh srt-hevc
       - uses: actions/upload-artifact@v4
         if: always()
         with:

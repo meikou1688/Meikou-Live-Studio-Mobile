@@ -18,7 +18,7 @@ for source in sources:
     for stream in data["streams"]:
         times = sorted(float(p["pts_time"]) for p in data["packets"] if p["stream_index"] == stream["index"])
         clocks[stream["codec_name"]] = (times[0], times[-1])
-    video, audio = clocks["h264"], clocks["aac"]
+    video, audio = clocks["hevc" if protocol == "srt-hevc" else "h264"], clocks["aac"]
     skew = round((video[1]-video[0])-(audio[1]-audio[0]), 3)
     results[source.name] = {"video_seconds": round(video[1]-video[0], 3),
         "audio_seconds": round(audio[1]-audio[0], 3), "duration_difference": skew}
