@@ -16,6 +16,21 @@ data class Lens(val parent:String,val physical:String?,val focal:FloatArray,val 
         return prefix+" "+group+mm
     }
 }
+// Keep native widescreen modes and add canvases that a reported input can fill without upscaling.
+internal fun canvasSources(outputs:List<Size>):Map<Size,Size> {
+    val native=outputs.filter { it.width*9==it.height*16 }
+    val standard=listOf(Size(640,360),Size(1280,720),Size(1920,1080),Size(3840,2160))
+    val sources=linkedMapOf<Size,Size>()
+    for(canvas in (native+standard).distinct().sortedBy { it.width }) {
+        val source=outputs.filter { it.width>=canvas.width && it.height>=canvas.height }
+            .minWithOrNull(compareBy<Size>({ it.width.toLong()*it.height },{ it.width }))
+        if(source!=null)sources[canvas]=source
+    }
+    if(sources.isEmpty() && outputs.isNotEmpty()) {
+        sources[Size(640,360)]=outputs.maxBy { minOf(it.width*9,it.height*16) }
+    }
+    return sources
+}
 fun inventory(m:CameraManager):List<Lens> = buildList{
     for(id in m.cameraIdList){
         val parent=runCatching{m.getCameraCharacteristics(id)}.getOrNull()?:continue
@@ -26,12 +41,7 @@ fun inventory(m:CameraManager):List<Lens> = buildList{
             val outputs=map.getOutputSizes(android.graphics.SurfaceTexture::class.java).orEmpty()
                 .filter { it.width in 320..3840 && it.height in 1..it.width }
             if(outputs.isEmpty())continue
-            val wide=outputs.filter { it.width*9==it.height*16 }.distinct().sortedBy { it.width }
-            val candidates=wide.ifEmpty { listOf(Size(640,360),Size(1280,720),Size(1920,1080))
-                .filter { size -> size.width <= maxOf(640,outputs.maxOf { it.width }) } }
-            val sources=candidates.associateWith { size -> outputs.minWith(compareBy<Size>(
-                { if(it==size) 0 else 1 }, { kotlin.math.abs(it.width-size.width) },
-                { kotlin.math.abs(it.height-size.height) })) }
+            val sources=canvasSources(outputs)
             val zoom=parent[CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE]
             val parentRates=parent[CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES].orEmpty().map { it.upper }
             val rates=c[CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES].orEmpty()
@@ -40,7 +50,7 @@ fun inventory(m:CameraManager):List<Lens> = buildList{
                 val duration=runCatching { map.getOutputMinFrameDuration(android.graphics.SurfaceTexture::class.java,source) }.getOrDefault(0L)
                 rates.filter { fps -> duration<=0 || fps<=Math.round(1e9/duration) }
             }
-            val sizes=candidates.filter { supported.getValue(it).isNotEmpty() }
+            val sizes=sources.keys.filter { supported.getValue(it).isNotEmpty() }
             if(sizes.isEmpty())continue
             add(Lens(id,physical,c[CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS]?:floatArrayOf(),c[CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE]?.width,sizes,rates,if(physical==null)zoom?.lower?:1f else 1f,if(physical==null)zoom?.upper?:1f else 1f,c[CameraCharacteristics.LENS_FACING]==CameraCharacteristics.LENS_FACING_FRONT,c[CameraCharacteristics.SENSOR_ORIENTATION]?:90,sources,supported))
         }
