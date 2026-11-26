@@ -24,6 +24,9 @@ class SceneCompositor(private val ctx:android.content.Context,private val width:
     private var windowConfig:EGLConfig?=null
     private var encodeWindow=EGL14.EGL_NO_SURFACE
     private var cameraProgram=0
+    private var cameraFilterProgram=0
+    private var effectUniform=0
+    private val backdropViewport=IntArray(4)
     private var layerProgram=0
     private var cameraTex=0
     private lateinit var source:SurfaceTexture
@@ -152,6 +155,25 @@ class SceneCompositor(private val ctx:android.content.Context,private val width:
         check(EGL14.eglMakeCurrent(display,first,first,context))
         val sample=" varying vec2 tex; void main(){gl_FragColor=texture2D(image,tex);}"
         cameraProgram=program("#extension GL_OES_EGL_image_external : require\nprecision mediump float; uniform samplerExternalOES image;"+sample)
+        cameraFilterProgram=program("""#extension GL_OES_EGL_image_external : require
+            precision mediump float;
+            uniform samplerExternalOES image;
+            uniform int effect;
+            varying vec2 tex;
+            void main(){
+                vec3 c=texture2D(image,tex).rgb;
+                float alpha=1.0;
+                if(effect==1)c=vec3(dot(c,vec3(0.299,0.587,0.114)));
+                else if(effect==2)c=clamp(c*vec3(1.10,1.02,0.90),0.0,1.0);
+                else if(effect==3)c=clamp(c*vec3(0.90,1.02,1.10),0.0,1.0);
+                else if(effect==4 || effect==5){
+                    float excess=effect==4 ? c.g-max(c.r,c.b) : c.b-max(c.r,c.g);
+                    alpha=1.0-smoothstep(0.08,0.35,excess);
+                }
+                gl_FragColor=vec4(c*alpha,alpha);
+            }
+        """.trimIndent())
+        effectUniform=glGetUniformLocation(cameraFilterProgram,"effect")
         layerProgram=program("precision mediump float; uniform sampler2D image;"+sample)
         cameraTex=texture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES)
         source=SurfaceTexture(cameraTex);val captureSize=lens?.sourceFor(width,height);source.setDefaultBufferSize(captureSize?.width?:width,captureSize?.height?:height);input=Surface(source)
@@ -205,14 +227,15 @@ class SceneCompositor(private val ctx:android.content.Context,private val width:
         android.opengl.Matrix.translateM(viewTransform,0,-.5f,-.5f,0f)
         if(selected!=null)CameraGeometry.cameraCrop(matrix,rawCrop)
         android.opengl.Matrix.multiplyMM(cameraTransform,0,if(selected!=null)rawCrop else matrix,0,viewTransform,0)
-        val layers=scenes.active.layers
+        val scene=scenes.active
+        val layers=scene.layers
         val iter=sprites.iterator();while(iter.hasNext()){val e=iter.next();if(layers.none{it.id==e.key}){glDeleteTextures(1,intArrayOf(e.value.tex),0);iter.remove()}}
         val time=SystemClock.elapsedRealtime()
         slides.keys.retainAll(layers.filter{it.kind=="slides"}.map{it.id}.toSet())
         val obsolete=clips.keys.filter{id->layers.none{it.id==id}}
         obsolete.forEach{clips.remove(it)?.close()}
         val visible=layers.mapNotNull{layer->
-            if(layer.kind=="music")null
+            if(layer.kind=="music" || layer.kind=="backdrop")null
             else if(layer.kind=="slides")slide(layer,time)?.let{layer to it}
             else if(layer.kind!="video" && layer.kind!="clips")sprite(layer)?.let{layer to it}
             else{
@@ -224,6 +247,8 @@ class SceneCompositor(private val ctx:android.content.Context,private val width:
                 else null
             }
         }
+        val effect=if(selected==null)0 else scene.cameraEffect
+        val backdrop=if(effect>=4)layers.lastOrNull{it.kind=="backdrop"}?.let{sprite(it.copy(kind="image"))} else null
         fun output(window:EGLSurface,record:Boolean){
             check(EGL14.eglMakeCurrent(display,window,window,context))
             check(EGL14.eglQuerySurface(display,window,EGL14.EGL_WIDTH,windowSize,0))
@@ -238,7 +263,16 @@ class SceneCompositor(private val ctx:android.content.Context,private val width:
             glClearColor(0f,0f,0f,1f);glClear(GL_COLOR_BUFFER_BIT)
             glViewport(canvasViewport[0]+cameraViewport[0],canvasViewport[1]+cameraViewport[1],cameraViewport[2],cameraViewport[3])
             glDisable(GL_BLEND);coords.position(0);coords.put(square);coords.position(0)
-            draw(cameraProgram,GLES11Ext.GL_TEXTURE_EXTERNAL_OES,cameraTex,cameraUv,cameraTransform)
+            if(backdrop!=null){
+                val fit=backdropViewport
+                CameraGeometry.fit((backdrop.aspect*1000).toInt().coerceAtLeast(1),1000,canvasViewport[2],canvasViewport[3],fit)
+                glViewport(canvasViewport[0]+fit[0],canvasViewport[1]+fit[1],fit[2],fit[3])
+                draw(layerProgram,GL_TEXTURE_2D,backdrop.tex,layerUv,identity)
+                glViewport(canvasViewport[0]+cameraViewport[0],canvasViewport[1]+cameraViewport[1],cameraViewport[2],cameraViewport[3])
+                glEnable(GL_BLEND);glBlendFunc(GL_ONE,GL_ONE_MINUS_SRC_ALPHA)
+            }
+            glUseProgram(cameraFilterProgram);glUniform1i(effectUniform,effect)
+            draw(cameraFilterProgram,GLES11Ext.GL_TEXTURE_EXTERNAL_OES,cameraTex,cameraUv,cameraTransform)
             glViewport(canvasViewport[0],canvasViewport[1],canvasViewport[2],canvasViewport[3])
             glEnable(GL_BLEND);glBlendFunc(GL_ONE,GL_ONE_MINUS_SRC_ALPHA)
             val frames=if(record)null else mutableListOf<LayerFrame>()

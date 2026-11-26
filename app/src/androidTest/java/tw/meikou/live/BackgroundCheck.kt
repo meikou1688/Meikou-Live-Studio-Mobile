@@ -67,7 +67,7 @@ class BackgroundCheck : Instrumentation() {
             pcm.putShort(tone).putShort(tone)
         }
         wav.writeBytes(pcm.array())
-        ui { scenes.layers(scenes.active.layers+listOf(
+        ui { scenes.cameraEffect(1);scenes.layers(scenes.active.layers+listOf(
             Overlay(kind="slides",value="",x=.18f,y=.5f,width=.18f,items=slides,slideSeconds=2),
             Overlay(kind="music",value="",items=listOf(android.net.Uri.fromFile(wav).toString()),volume=50))) }
     }

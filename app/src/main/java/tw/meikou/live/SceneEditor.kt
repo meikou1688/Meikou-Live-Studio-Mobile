@@ -8,7 +8,7 @@ import android.widget.*
 import kotlin.math.*
 
 class SceneEditor(private val host:Activity,private val scenes:Scenes,private val preview:LayerCanvas,private val cleanPreview:(Boolean)->Unit,private val canPick:()->Boolean){
-    companion object{const val PICK=701;const val PICK_VIDEO=702;const val PICK_SLIDES=706;const val PICK_CLIPS=707;const val PICK_MUSIC=708}
+    companion object{const val PICK=701;const val PICK_VIDEO=702;const val PICK_SLIDES=706;const val PICK_CLIPS=707;const val PICK_MUSIC=708;const val PICK_GREEN=709;const val PICK_BLUE=710}
     private var selected:String?=null
     private var previousX=0f
     private var previousY=0f
@@ -27,6 +27,26 @@ class SceneEditor(private val host:Activity,private val scenes:Scenes,private va
     private fun prompt(title:String,initial:String="",apply:(String)->Unit){
         val text=EditText(host).apply{setSingleLine();setText(initial);filters=arrayOf(android.text.InputFilter.LengthFilter(100))}
         AlertDialog.Builder(host).setTitle(title).setView(text).setPositiveButton("確定"){_,_->text.text.toString().trim().takeIf{it.isNotEmpty()}?.let(apply)}.setNegativeButton("取消",null).show()
+    }
+    fun effects(){
+        val effects=arrayOf("原色","黑白","暖色","冷色","綠幕換背景","藍幕換背景")
+        AlertDialog.Builder(host).setTitle("鏡頭效果").setSingleChoiceItems(effects,scenes.active.cameraEffect){dialog,index->
+            dialog.dismiss()
+            if(index<4)scenes.cameraEffect(index)
+            else if(canPick())host.startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).setType("image/*").addCategory(Intent.CATEGORY_OPENABLE),
+                if(index==4)PICK_GREEN else PICK_BLUE)
+            else if(scenes.active.layers.any{it.kind=="backdrop"})scenes.cameraEffect(index)
+            else toast("請在開播前先選擇背景圖片")
+        }.show()
+    }
+    fun backdrop(uri:Uri,green:Boolean){
+        runCatching{
+            host.contentResolver.takePersistableUriPermission(uri,Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            val image=scenes.decode(uri)
+            scenes.layers(scenes.active.layers.filterNot{it.kind=="backdrop"}+
+                Overlay(kind="backdrop",value=uri.toString(),bitmap=image,locked=true))
+            scenes.cameraEffect(if(green)4 else 5)
+        }.onFailure{toast("無法讀取背景圖片")}
     }
     fun chooseScene(){
         val list=scenes.scenes()
@@ -69,7 +89,7 @@ class SceneEditor(private val host:Activity,private val scenes:Scenes,private va
     }
     private fun title(v:Overlay)=when(v.kind){"image"->"圖片／台標";"video"->"影片（靜音循環）";"clock"->"時鐘";"music"->"背景音樂播放清單";"slides"->"圖片播放清單";"clips"->"影片播放清單（靜音）";"date"->"日期";"qr"->"QR Code";"score"->"比分板";"ticker"->"跑馬燈 · "+v.value;else->"文字 · "+v.value}
     fun edit(){
-        val layers=scenes.active.layers.reversed()
+        val layers=scenes.active.layers.filterNot{it.kind=="backdrop"}.reversed()
         val choices=listOf("新增文字","新增圖片／台標","新增跑馬燈","新增時鐘","新增影片（靜音循環）","新增日期","新增 QR Code","新增比分板","新增圖片播放清單","新增影片播放清單（靜音）","選擇場景背景音樂")+layers.map{title(it)}
         AlertDialog.Builder(host).setTitle("素材圖層 · "+scenes.active.name).setItems(choices.toTypedArray()){_,i->
             when(i){

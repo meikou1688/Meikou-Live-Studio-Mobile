@@ -298,6 +298,7 @@ class Studio:Activity(){
             bar.visibility=state;transport.visibility=state
         }){capture==null}
         button("選擇或新增場景"){settingsOpen(false);sceneEditor.chooseScene()}
+        button("鏡頭濾鏡與換背景"){settingsOpen(false);sceneEditor.effects()}
         button("編輯素材圖層"){settingsOpen(false);sceneEditor.edit()}
         section("串流輸出")
         label("RTMP／RTMPS 或 SRT 伺服器網址")
@@ -556,6 +557,7 @@ class Studio:Activity(){
             }
             return
         }
+        if(requestCode in listOf(SceneEditor.PICK_GREEN,SceneEditor.PICK_BLUE) && resultCode==RESULT_OK)data?.data?.let{sceneEditor.backdrop(it,requestCode==SceneEditor.PICK_GREEN)}
         if(requestCode in listOf(SceneEditor.PICK_SLIDES,SceneEditor.PICK_CLIPS,SceneEditor.PICK_MUSIC) && resultCode==RESULT_OK && data!=null)sceneEditor.playlist(data,requestCode)
         if(requestCode in listOf(SceneEditor.PICK,SceneEditor.PICK_VIDEO) && resultCode==RESULT_OK)data?.data?.let{sceneEditor.media(it,requestCode==SceneEditor.PICK_VIDEO)}
     }

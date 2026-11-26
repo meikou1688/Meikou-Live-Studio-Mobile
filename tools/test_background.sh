@@ -55,6 +55,11 @@ assert np.max(np.abs(center-[.62,.55]))<.03,center
 assert edges.max()/edges.min()<1.08,edges
 assert .17<edges.mean()/im.shape[1]<.27,edges
 print("Decoded receiver QR at",center,"edge lengths",edges)
+h,w=im.shape[:2]
+camera=im[int(.1*h):int(.35*h),int(.12*w):int(.8*w)].astype(int)
+assert np.percentile(camera.max(axis=2)-camera.min(axis=2),99)<12,"camera grayscale filter failed"
+assert camera.std()>3,"camera sample lacks visible detail"
+print("Decoded camera grayscale; separate scene overlays retain their colors")
 import subprocess
 pixels=subprocess.check_output(["ffmpeg","-v","error","-i","build/background.mkv","-an","-vf",
     "fps=2,crop=4:4:iw*0.18:ih*0.5,scale=1:1","-pix_fmt","rgb24","-f","rawvideo","-"])
