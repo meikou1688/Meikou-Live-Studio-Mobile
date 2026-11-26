@@ -23,3 +23,9 @@
 | 備份 | tools/milestone.ps1 可執行建置、測試、含 SHA-256 的版本備份 |
 
 首版範圍與逐項缺口請見 [Android 功能對照與驗收紀錄](ANDROID-V1-PARITY.md)。X300 Ultra 的單機直播、三鏡與收音為首要實測；所有尚缺的手機版對照功能均列入正式首版。
+
+## Android 測試用戶端與 0.1.2 安裝檔
+
+Google Auth Platform 已在專案 `meikou-live-studio-mobile` 建立 Android OAuth 用戶端，套件名稱為 `tw.meikou.live`，使用 0.1.2 測試 APK 的簽章。控制台顯示一位測試使用者。換用其他簽署金鑰時，需要登記對應的憑證指紋。個人帳號及授權權杖不收錄於儲存庫。
+
+公開測試檔位於 `releases/v0.1.2/Meikou-Live-Mobile-0.1.2.apk`，SHA-256 為 `2df7cf6a08166ba7319532778634418f3589f57da9715c2fdbe292c322429de2`。此版本以自訂 RTMP 或 RTMPS 網址推流。App 內 YouTube 頻道授權、頻道讀取及 YouTube 接收端驗證仍未完成。
