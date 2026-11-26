@@ -46,3 +46,5 @@ Android 版加入 Google Identity Services 授權流程，使用 youtube.readonl
 
 
 0.1.6 開發候選版將相機輸入尺寸與播出畫布分開。更換鏡頭會重新設定輸入緩衝區。背景直播須在前景明確勾選後開播，切換其他 App 可卸離預覽；離開工作且活動被銷毀會停止。預定直播採唯讀授權，透過 Android 分享選單傳送觀看連結。
+
+SRT 主動連線現已接至 RootEncoder 2.8.2 的 srt 與 common 模組，接受裝置實際編碼的 H.264 或 H.265 與 AAC。SRT 目的地須提供連接埠及串流識別碼，目前不接受加密參數。測試在模擬器經 UDP 發給獨立 FFmpeg SRT 接收端。上游版本 https://github.com/pedroSG94/RootEncoder/tree/2.8.2 ，授權隨 APK 放在 assets/licenses。

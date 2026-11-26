@@ -24,8 +24,10 @@ class Capture(private val ctx:Context, private val preview:Surface?, private val
     private val projectionCallback=object:android.media.projection.MediaProjection.Callback(){override fun onStop(){stop()}}
     private val stopping=AtomicBoolean()
     private val bad=AtomicBoolean()
+    private val additionalOutputs=additional.isNotEmpty()
     private val extra=ExtraOutputs(additional,outputStatus)
-    private val client=target?.let{Rtmp(it)}
+    private val client=target?.takeUnless { it.scheme=="srt" }?.let { Rtmp(it) }
+    private val srt=target?.takeIf { it.scheme=="srt" }?.let { SrtOutput(it,profile.hevc) }
     private val camThread=HandlerThread("Camera")
     private var camera:CameraDevice?=null
     private var session:CameraCaptureSession?=null
@@ -59,13 +61,13 @@ class Capture(private val ctx:Context, private val preview:Surface?, private val
     private val cameraReady=CountDownLatch(1)
     private val cameraLock=Any()
 
-    fun stop(){stopping.set(true);client?.close();extra.close();cameraReady.countDown()}
+    fun stop(){stopping.set(true);client?.close();srt?.close();extra.close();cameraReady.countDown()}
     private fun fail(){bad.set(true);stop()}
     fun start()=thread(name="Capture") {
         try {
             camThread.start()
             if(stopping.get())return@thread
-            try { client?.connect() } catch(e:java.io.IOException){onlineFailure=true;throw e}
+            try { client?.connect();srt?.connect() } catch(e:java.io.IOException){onlineFailure=true;throw e}
             if(!stopping.get()){
                 extra.start()
                 prepare()
@@ -104,7 +106,7 @@ class Capture(private val ctx:Context, private val preview:Surface?, private val
             listOf(video,audio).forEach{runCatching{it?.stop()};runCatching{it?.release()}}
             runCatching{encoderSurface?.release()}
             if(muxStarted)runCatching{mux!!.stop()}.onFailure{recordingFailed=true}
-            runCatching{mux?.release()};client?.close();extra.close();camThread.quitSafely()
+            runCatching{mux?.release()};client?.close();srt?.close();extra.close();camThread.quitSafely()
             val ok=!bad.get() && delivered.all{it}
             val saved=muxStarted && !recordingFailed && recorded.all{it}
             if(!saved)file?.delete()
@@ -259,12 +261,15 @@ class Capture(private val ctx:Context, private val preview:Surface?, private val
                         if(muxStarted)writeRecording(frame)
                         else{require(pending.size<160);pending.add(frame)}
                     }
-                    if(client!=null && !stopping.get())writeNetwork(frame)
+                    if(target!=null && !stopping.get()){
+                        try{srt?.send(a,bytes,pts,info.flags)}catch(e:java.io.IOException){onlineFailure=!stopping.get();throw e}
+                        if(client!=null || (!profile.hevc && additionalOutputs))writeNetwork(frame)
+                    }
                     if(!stopping.get()){
                         delivered[if(a)1 else 0]=true
-                        if(!published && delivered.all{it} && (mux==null || recorded.all{it})){
+                        if(!published && srt?.sentBoth()!=false && delivered.all{it} && (mux==null || recorded.all{it})){
                             published=true
-                            notify(if(client!=null)1 else 2)
+                            notify(if(target!=null)1 else 2)
                         }
                     }
                 }
@@ -276,11 +281,12 @@ class Capture(private val ctx:Context, private val preview:Surface?, private val
             tracks[if(a)1 else 0]=mux!!.addTrack(f)
             if(tracks.all{it>=0}){mux!!.start();muxStarted=true;pending.forEach(::writeRecording);pending.clear()}
         }
-        if(client!=null && !stopping.get()){
+        if(!a && !stopping.get())srt?.configure(f)
+        if((client!=null || additionalOutputs) && !stopping.get()){
             fun csd(n:Int):ByteArray{val b=f.getByteBuffer("csd-"+n)!!.duplicate();return ByteArray(b.remaining()).also{b.get(it)}}
             val type=if(a)8 else 9
             val config=if(a)byteArrayOf(0xaf.toByte(),0)+csd(0) else Avc.config(Avc.units(csd(0))+Avc.units(csd(1)))
-            client!!.media(type,0,config);extra.send(type,0,config)
+            client?.media(type,0,config);extra.send(type,0,config)
         }
     }
     private fun writeRecording(f:Frame){
@@ -294,7 +300,7 @@ class Capture(private val ctx:Context, private val preview:Surface?, private val
     private fun writeNetwork(f:Frame){
             val packet=if(f.audio)byteArrayOf(0xaf.toByte(),1)+f.bytes else Avc.frame(f.bytes,f.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME!=0)
             val now=System.nanoTime()
-            try{client!!.media(if(f.audio)8 else 9,(f.pts/1000).toInt(),packet)}
+            try{client?.media(if(f.audio)8 else 9,(f.pts/1000).toInt(),packet)}
             catch(e:Exception){onlineFailure=!stopping.get();throw e}
             extra.send(if(f.audio)8 else 9,(f.pts/1000).toInt(),packet)
             writeTime+=System.nanoTime()-now

@@ -9,7 +9,8 @@ import java.util.concurrent.FutureTask
 
 /** Exercises the production Activity, Camera2, AudioRecord, encoder, notification and RTMP publisher. */
 class BackgroundCheck : Instrumentation() {
-    override fun onCreate(arguments:Bundle?){super.onCreate(arguments);start()}
+    private var srt=false
+    override fun onCreate(arguments:Bundle?){super.onCreate(arguments);srt=arguments?.getString("protocol")=="srt";start()}
     private fun <T> ui(block:()->T):T{
         val task=FutureTask(Callable(block))
         runOnMainSync(task)
@@ -29,8 +30,8 @@ class BackgroundCheck : Instrumentation() {
         try{
             val launch=Intent(targetContext,Studio::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             val activity=startActivitySync(launch)
-            ui { (field(activity,"address") as EditText).setText("rtmp://127.0.0.1:1935/live")
-                (field(activity,"streamKey") as EditText).setText("integration")
+            ui { (field(activity,"address") as EditText).setText(if(srt)"srt://10.0.2.2:19001/integration" else "rtmp://127.0.0.1:1935/live")
+                (field(activity,"streamKey") as EditText).setText(if(srt)"" else "integration")
                 (field(activity,"backgroundLive") as CheckBox).isChecked=true }
             until { ui { (field(activity,"rates") as Spinner).count>0 && field(activity,"finder")!=null } }
             ui { (field(activity,"live") as Button).performClick() }

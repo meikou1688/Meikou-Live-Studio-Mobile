@@ -7,11 +7,14 @@ for permission in CAMERA RECORD_AUDIO POST_NOTIFICATIONS; do
   adb shell pm grant tw.meikou.live "android.permission.$permission"
 done
 adb reverse tcp:1935 tcp:1935
-ffmpeg -nostdin -hide_banner -loglevel warning -y -listen 1 -i rtmp://127.0.0.1:1935/live/integration -c copy build/background.mkv >build/receiver.log 2>&1 &
+protocol=${1:-rtmp}
+listener=(-listen 1 -i rtmp://127.0.0.1:1935/live/integration)
+if [[ $protocol == srt ]]; then listener=(-i 'srt://0.0.0.0:19001?mode=listener&transtype=live'); fi
+ffmpeg -nostdin -hide_banner -loglevel warning -y "${listener[@]}" -c copy build/background.mkv >build/receiver.log 2>&1 &
 receiver=$!
 trap 'kill "$receiver" 2>/dev/null || true' EXIT
 sleep 1
-adb shell am instrument -w tw.meikou.live.test/tw.meikou.live.BackgroundCheck | tee build/instrumentation.txt
+adb shell am instrument -w -e protocol "$protocol" tw.meikou.live.test/tw.meikou.live.BackgroundCheck | tee build/instrumentation.txt
 grep -q MEIKOU_BACKGROUND_OK build/instrumentation.txt
 for _ in {1..20}; do kill -0 "$receiver" 2>/dev/null || break; sleep 0.5; done
 ffmpeg -v error -xerror -i build/background.mkv -f null -
@@ -31,3 +34,4 @@ assert set(stats)=={"h264","aac"},stats
 Path("build/background-results.json").write_text(json.dumps(stats,indent=2))
 print(stats)
 PY
+cp build/background-results.json "build/background-$protocol-results.json"

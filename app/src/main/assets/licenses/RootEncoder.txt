@@ -1,0 +1,1 @@
+RootEncoder 2.8.2 (srt, common) — Pedro Sánchez and contributors. Apache License 2.0. https://github.com/pedroSG94/RootEncoder/tree/2.8.2

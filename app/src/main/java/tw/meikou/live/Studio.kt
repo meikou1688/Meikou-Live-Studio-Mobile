@@ -278,7 +278,7 @@ class Studio:Activity(){
         val sound=getSystemService(AUDIO_SERVICE) as AudioManager
         devices=sound.getDevices(AudioManager.GET_DEVICES_INPUTS).toList()
         options(inputs,listOf(ui("system_default"))+devices.map{it.productName.toString()+" · "+it.id})
-        codecs=spinner(ui("codec"));options(codecs,listOf("H.264","H.265（限錄影）"))
+        codecs=spinner(ui("codec"));options(codecs,listOf("H.264","H.265（SRT 或錄影）"))
         button("專業相機"){professional()}
         button(ui("ev")){selectExposure()}
         val zoomLabel=label("系統變焦 1.0×")
@@ -300,7 +300,8 @@ class Studio:Activity(){
         button("選擇或新增場景"){settingsOpen(false);sceneEditor.chooseScene()}
         button("編輯素材圖層"){settingsOpen(false);sceneEditor.edit()}
         section("串流輸出")
-        label("RTMP／RTMPS 伺服器網址")
+        label("RTMP／RTMPS 或 SRT 伺服器網址")
+        label("SRT 主動連線格式：srt://主機:連接埠/串流識別碼")
         address=destinationField("例如 rtmps://伺服器/live",false)
         address.background=box("#20222b","#3a3e4c",4)
         address.setPadding(dp(10),dp(6),dp(10),dp(6));address.textSize=14f
@@ -448,8 +449,9 @@ class Studio:Activity(){
         val fps=rates.selectedItem as? Int?:return
         if(fps !in l.supportedRates[size].orEmpty()){status.text="此鏡頭無法使用選取的解析度與影格率";return}
         val p=Profile(if(portrait)size.height else size.width,if(portrait)size.width else size.height,fps,(bits.selectedItem as Int)*1000000,codecs.selectedItemPosition==1)
-        val uri=if(stream)runCatching{streamDestination(address.text.toString(),streamKey.text.toString())}.getOrNull() else null
-        if(stream && (uri==null || p.hevc)){status.text="直播請選用 H.264，並填寫伺服器網址及串流金鑰。";return}
+        val uri=if(stream)runCatching{primaryDestination(address.text.toString(),streamKey.text.toString())}.getOrNull() else null
+        if(stream && uri==null){status.text="請檢查伺服器網址、串流金鑰或 SRT 串流識別碼。";return}
+        if(stream && p.hevc && (uri?.scheme!="srt" || additional.isNotEmpty())){status.text="H.265 直播請使用單一 SRT 目的地";return}
         if(stream && uri in additional){status.text="主要與額外目的地重複";return}
         if(stream && backgroundLive.isChecked){
             if(Build.VERSION.SDK_INT>=33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED){
@@ -518,7 +520,7 @@ class Studio:Activity(){
         if(ScreenService.running){startService(Intent(this,ScreenService::class.java).setAction(ScreenService.STOP));return}
         if(capture!=null || waiting || !granted()){status.text="請先停止相機直播或錄影，並允許麥克風權限";return}
         choose("螢幕分享",listOf("直播螢幕與麥克風","錄製螢幕與麥克風")){choice->
-            val url=if(choice==0)runCatching{streamDestination(address.text.toString(),streamKey.text.toString())}.getOrNull() else null
+            val url=if(choice==0)runCatching{primaryDestination(address.text.toString(),streamKey.text.toString())}.getOrNull() else null
             if(choice==0 && (url==null || url in additional)){status.text="請先設定有效且不重複的推流網址";return@choose}
             val size=sizes.selectedItem as? android.util.Size ?:android.util.Size(1280,720)
             pendingScreen=Intent(this,ScreenService::class.java).apply{
