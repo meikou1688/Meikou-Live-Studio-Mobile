@@ -41,3 +41,7 @@ USB 基準驗收可在一般 Windows 開發環境執行 tools/device_check.ps1�
 | FFmpeg → SRT/UDP → FFmpeg | 86 | 134 |
 
 測試來源採 FFmpeg 編碼的三秒測試圖與音調。兩種網路傳輸皆在同一台 Linux 主機上透過網路通訊端傳送。SRT 數據僅驗證測試設備與接收端。手機端 SRT、RTMPS 接收、YouTube 授權回傳、VIVO 三實體鏡頭、外接音訊及 Speedify 仍待實測。詳見 releases/v0.1.3/transport-results.json。
+
+## 0.1.4 預覽比例回歸
+
+0.1.3 的實機截圖顯示人物、把手明顯變形，另有橫式介面中畫面側轉。已更新共用合成器及預覽尺寸配置，並加入 CameraGeometryCheck。8 組裁切／軸交換／鏡射組合及 8 組畫布置中等比例測試均在 JVM 通過。驗收須用 VIVO 的廣角、一般及長焦分別拍攝正對鏡頭的圓形或方格，核對左右橫握、直式、預覽、MP4 與推流接收端的方向與長寬比。此工作階段的 ADB 服務無法啟動，尚無本版實機畫面驗收結果。
