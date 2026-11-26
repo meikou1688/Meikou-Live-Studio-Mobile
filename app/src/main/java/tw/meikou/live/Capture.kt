@@ -1,0 +1,251 @@
+package tw.meikou.live
+
+import android.annotation.SuppressLint
+import android.content.Context
+import android.hardware.camera2.*
+import android.media.*
+import android.os.*
+import android.view.Surface
+import java.io.File
+import java.net.URI
+import java.nio.ByteBuffer
+import java.util.concurrent.*
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.concurrent.thread
+
+data class Profile(val width:Int,val height:Int,val fps:Int,val bitrate:Int,val hevc:Boolean)
+private data class Frame(val audio:Boolean,val pts:Long,val flags:Int,val bytes:ByteArray)
+
+class Capture(private val ctx:Context, private val preview:Surface, private val profile:Profile,
+              private var lens:Lens, private val inputDevice:AudioDeviceInfo?, private val initialZoom:Float, private val telemetry:(String)->Unit, private val target:URI?, private val file:File?, private val notify:(Int)->Unit,
+              private val finished:(Boolean,Boolean)->Unit) {
+    private val stopping=AtomicBoolean()
+    private val bad=AtomicBoolean()
+    private val client=target?.let{Rtmp(it)}
+    private val camThread=HandlerThread("Camera")
+    private var camera:CameraDevice?=null
+    private var session:CameraCaptureSession?=null
+    private var video:MediaCodec?=null
+    private var audio:MediaCodec?=null
+    private var mic:AudioRecord?=null
+    private var encoderSurface:Surface?=null
+    private var mux:MediaMuxer?=null
+    private var muxStarted=false
+    private val tracks=IntArray(2){-1}
+    private val pending=ArrayList<Frame>()
+    private var published=false
+    private var onlineFailure=false
+    private var currentBitrate=profile.bitrate
+    private var probeStart=0L
+    private var writeTime=0L
+    private var stableWindows=0
+    private var videoOrigin=-1L
+    private var startNs=0L
+    private var audioOrigin=0L
+    private var samples=0L
+    private val delivered=BooleanArray(2)
+    private val cameraReady=CountDownLatch(1)
+    private val cameraLock=Any()
+
+    fun stop(){stopping.set(true);client?.close();cameraReady.countDown()}
+    private fun fail(){bad.set(true);stop()}
+    fun start()=thread(name="Capture") {
+        try {
+            camThread.start()
+            try { client?.connect() } catch(e:java.io.IOException){onlineFailure=true;throw e}
+            if(!stopping.get()){
+                prepare()
+                openCamera()
+                check(cameraReady.await(8,TimeUnit.SECONDS))
+                if(!stopping.get()){
+                    startNs=System.nanoTime()
+                    mic!!.startRecording()
+                    check(mic!!.recordingState==AudioRecord.RECORDSTATE_RECORDING)
+                    audioOrigin=(System.nanoTime()-startNs)/1000
+                    while(!stopping.get()){feedMicrophone();drain(video!!,false);drain(audio!!,true)}
+                }
+            }
+        }catch(e:Exception){if(!stopping.get())bad.set(true)}
+        finally{
+            stopping.set(true)
+            synchronized(cameraLock){runCatching{session?.close()};runCatching{camera?.close()}}
+            runCatching{mic?.stop()};runCatching{mic?.release()}
+            if(file!=null && muxStarted && !bad.get()){
+                runCatching{video!!.signalEndOfInputStream();val id=audio!!.dequeueInputBuffer(20000)
+                    if(id>=0)audio!!.queueInputBuffer(id,0,0,audioOrigin+samples*1000000/48000,MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                    repeat(12){drain(video!!,false);drain(audio!!,true);Thread.sleep(5)}
+                }.onFailure{bad.set(true)}
+            }
+            listOf(video,audio).forEach{runCatching{it?.stop()};runCatching{it?.release()}}
+            runCatching{encoderSurface?.release()}
+            if(muxStarted)runCatching{mux!!.stop()}.onFailure{bad.set(true)}
+            runCatching{mux?.release()};client?.close();camThread.quitSafely()
+            val ok=!bad.get() && delivered.all{it}
+            if(!ok)file?.delete()
+            finished(ok,onlineFailure)
+        }
+    }
+    @SuppressLint("MissingPermission")
+    private fun prepare(){
+        val mime=if(profile.hevc) MediaFormat.MIMETYPE_VIDEO_HEVC else MediaFormat.MIMETYPE_VIDEO_AVC
+        val vf=MediaFormat.createVideoFormat(mime,profile.width,profile.height).apply{
+            setInteger(MediaFormat.KEY_COLOR_FORMAT,MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
+            setInteger(MediaFormat.KEY_BIT_RATE,profile.bitrate);setInteger(MediaFormat.KEY_FRAME_RATE,profile.fps)
+            setInteger(MediaFormat.KEY_I_FRAME_INTERVAL,2)
+            if(!profile.hevc)setInteger(MediaFormat.KEY_PROFILE,MediaCodecInfo.CodecProfileLevel.AVCProfileBaseline)
+        }
+        val chosen=MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos.firstOrNull{
+            it.isEncoder && it.isHardwareAccelerated && it.supportedTypes.contains(mime) &&
+                runCatching{it.getCapabilitiesForType(mime).isFormatSupported(vf)}.getOrDefault(false)
+        }
+        video=(chosen?.let{MediaCodec.createByCodecName(it.name)} ?: MediaCodec.createEncoderByType(mime)).also{video=it;it.configure(vf,null,null,MediaCodec.CONFIGURE_FLAG_ENCODE);encoderSurface=it.createInputSurface();it.start()}
+        val af=MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_AAC,48000,1).apply{
+            setInteger(MediaFormat.KEY_AAC_PROFILE,MediaCodecInfo.CodecProfileLevel.AACObjectLC);setInteger(MediaFormat.KEY_BIT_RATE,96000)}
+        audio=MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_AUDIO_AAC).also{audio=it;it.configure(af,null,null,MediaCodec.CONFIGURE_FLAG_ENCODE);it.start()}
+        val min=AudioRecord.getMinBufferSize(48000,AudioFormat.CHANNEL_IN_MONO,AudioFormat.ENCODING_PCM_16BIT)
+        require(min>0)
+        mic=AudioRecord(MediaRecorder.AudioSource.CAMCORDER,48000,AudioFormat.CHANNEL_IN_MONO,AudioFormat.ENCODING_PCM_16BIT,maxOf(min*2,8192))
+        check(mic!!.state==AudioRecord.STATE_INITIALIZED)
+        if(inputDevice!=null)check(mic!!.setPreferredDevice(inputDevice))
+        file?.let{mux=MediaMuxer(it.absolutePath,MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)}
+    }
+    @SuppressLint("MissingPermission")
+    private fun openCamera(){
+        val manager=ctx.getSystemService(Context.CAMERA_SERVICE) as CameraManager
+        val selected=lens
+        val id=selected.parent
+        val generation=++revision
+        val handler=Handler(camThread.looper)
+        manager.openCamera(id,object:CameraDevice.StateCallback(){
+            override fun onOpened(c:CameraDevice){synchronized(cameraLock){
+                if(stopping.get() || generation!=revision){c.close();return}
+                camera=c
+                try{
+                    val surfaces=listOf(preview,encoderSurface!!)
+                    val request=c.createCaptureRequest(CameraDevice.TEMPLATE_RECORD).apply{
+                        surfaces.forEach{addTarget(it)}
+                        val ranges=manager.getCameraCharacteristics(id)[CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES].orEmpty()
+                        val range=ranges.filter{it.upper==profile.fps}.maxByOrNull{it.lower} ?: error("fps")
+                        set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE,range)
+                    }
+                    val outputs=surfaces.map{android.hardware.camera2.params.OutputConfiguration(it).apply{
+                        if(selected.physical!=null)setPhysicalCameraId(selected.physical)
+                    }}
+                    val callback=object:CameraCaptureSession.StateCallback(){
+                        override fun onConfigured(s:CameraCaptureSession){synchronized(cameraLock){
+                            if(stopping.get() || generation!=revision){s.close();return}
+                            try{session=s;builder=request;applyRequest();cameraReady.countDown()}catch(e:Exception){fail()}
+                        }}
+                        override fun onConfigureFailed(s:CameraCaptureSession){s.close();if(generation==revision)fail()}
+                    }
+                    c.createCaptureSession(android.hardware.camera2.params.SessionConfiguration(0,outputs,java.util.concurrent.Executor{handler.post(it)},callback))
+                }catch(e:Exception){fail()}
+            }}
+            override fun onError(c:CameraDevice,error:Int){c.close();if(generation==revision)fail()}
+            override fun onDisconnected(c:CameraDevice){c.close();if(generation==revision)fail()}
+        },handler)
+    }
+    private var revision=0
+    private var builder:CaptureRequest.Builder?=null
+    private var zoom=initialZoom
+    private var lastTelemetry=""
+    private fun applyRequest(){
+        val req=builder?:return
+        if(lens.physical==null && lens.zoomMax>lens.zoomMin)req.set(CaptureRequest.CONTROL_ZOOM_RATIO,zoom)
+        session?.setRepeatingRequest(req.build(),object:CameraCaptureSession.CaptureCallback(){
+            override fun onCaptureCompleted(s:CameraCaptureSession,r:CaptureRequest,result:TotalCaptureResult){
+                val active=result[CaptureResult.LOGICAL_MULTI_CAMERA_ACTIVE_PHYSICAL_ID]
+                val focal=result[CaptureResult.LENS_FOCAL_LENGTH]
+                val route=mic?.routedDevice?.productName ?: "未回報"
+                val label="音訊 "+route+" · 作用中 ID "+(active?:"未回報")+" · "+(focal?.toString()?:"—")+" mm"
+                if(label!=lastTelemetry){lastTelemetry=label;telemetry(label)}
+            }
+        },Handler(camThread.looper))
+    }
+    fun changeLens(next:Lens){
+        if(!camThread.isAlive)return
+        Handler(camThread.looper).post{
+            if(stopping.get())return@post
+            synchronized(cameraLock){
+                revision++;session?.close();session=null;camera?.close();camera=null;builder=null
+                lens=next;zoom=1f
+                try{openCamera()}catch(e:Exception){fail()}
+            }
+        }
+    }
+    fun changeZoom(value:Float){
+        if(camThread.isAlive)Handler(camThread.looper).post{
+            if(!stopping.get())try{zoom=value.coerceIn(lens.zoomMin,lens.zoomMax);applyRequest()}catch(e:Exception){fail()}
+        }
+    }
+    private fun feedMicrophone(){
+        val c=audio!!
+        val i=c.dequeueInputBuffer(1000)
+        if(i<0)return
+        val b=c.getInputBuffer(i)!!
+        b.clear()
+        val n=mic!!.read(b,minOf(2048,b.capacity()),AudioRecord.READ_BLOCKING)
+        require(n>=0)
+        c.queueInputBuffer(i,0,n,audioOrigin+samples*1000000/48000,0)
+        samples+=n/2
+    }
+    private fun drain(c:MediaCodec,a:Boolean){
+        val info=MediaCodec.BufferInfo()
+        while(true){
+            val i=c.dequeueOutputBuffer(info,0)
+            if(i==MediaCodec.INFO_OUTPUT_FORMAT_CHANGED){format(a,c.outputFormat);continue}
+            if(i<0)return
+            try{
+                if(info.size>0 && info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG==0){
+                    val b=c.getOutputBuffer(i)!!;b.position(info.offset);b.limit(info.offset+info.size)
+                    val bytes=ByteArray(info.size);b.get(bytes)
+                    if(!a && videoOrigin<0)videoOrigin=info.presentationTimeUs-(System.nanoTime()-startNs)/1000
+                    val pts=(if(a)info.presentationTimeUs else info.presentationTimeUs-videoOrigin).coerceAtLeast(0)
+                    val frame=Frame(a,pts,info.flags,bytes)
+                    if(mux!=null && !muxStarted){require(pending.size<160);pending.add(frame)}else write(frame)
+                }
+            }finally{c.releaseOutputBuffer(i,false)}
+        }
+    }
+    private fun format(a:Boolean,f:MediaFormat){
+        if(mux!=null){
+            tracks[if(a)1 else 0]=mux!!.addTrack(f)
+            if(tracks.all{it>=0}){mux!!.start();muxStarted=true;pending.forEach(::write);pending.clear()}
+        }else{
+            fun csd(n:Int):ByteArray{val b=f.getByteBuffer("csd-"+n)!!.duplicate();return ByteArray(b.remaining()).also{b.get(it)}}
+            if(a)client!!.media(8,0,byteArrayOf(0xaf.toByte(),0)+csd(0))
+            else client!!.media(9,0,Avc.config(Avc.units(csd(0))+Avc.units(csd(1))))
+        }
+    }
+    private fun write(f:Frame){
+        if(muxStarted){
+            val info=MediaCodec.BufferInfo().apply{set(0,f.bytes.size,f.pts,f.flags)}
+            mux!!.writeSampleData(tracks[if(f.audio)1 else 0],ByteBuffer.wrap(f.bytes),info)
+        }else{
+            val packet=if(f.audio)byteArrayOf(0xaf.toByte(),1)+f.bytes else Avc.frame(f.bytes,f.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME!=0)
+            val now=System.nanoTime()
+            try{client!!.media(if(f.audio)8 else 9,(f.pts/1000).toInt(),packet)}
+            catch(e:Exception){onlineFailure=!stopping.get();throw e}
+            writeTime+=System.nanoTime()-now
+            if(probeStart==0L)probeStart=now
+            val elapsed=now-probeStart
+            if(elapsed>=2_000_000_000L){
+                val busy=writeTime.toDouble()/elapsed
+                if(busy<0.12)stableWindows++ else stableWindows=0
+                val next=when{
+                    busy>0.45 -> maxOf(profile.bitrate/4,currentBitrate*3/4)
+                    stableWindows>=3 -> minOf(profile.bitrate,currentBitrate+250000)
+                    else ->currentBitrate
+                }
+                if(next!=currentBitrate)runCatching{
+                    video!!.setParameters(Bundle().apply{putInt(MediaCodec.PARAMETER_KEY_VIDEO_BITRATE,next)})
+                    currentBitrate=next
+                }
+                writeTime=0;probeStart=now
+            }
+        }
+        delivered[if(f.audio)1 else 0]=true
+        if(!published && delivered.all{it}){published=true;notify(if(file==null)1 else 2)}
+    }
+}
+

@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "field-live",
+  "canvas": {
+    "width": 1920,
+    "height": 1080
+  },
+  "layers": [
+    {
+      "id": "camera",
+      "type": "camera",
+      "source": "device:preferred-back",
+      "visible": true,
+      "transform": {
+        "x": 0.5,
+        "y": 0.5,
+        "width": 1,
+        "height": 1,
+        "rotationDegrees": 0,
+        "opacity": 1
+      }
+    }
+  ]
+}

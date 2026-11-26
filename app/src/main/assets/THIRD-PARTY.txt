@@ -1,0 +1,1 @@
+Kotlin Standard Library 2.0.21 - JetBrains and Kotlin contributors. Apache License, Version 2.0. https://github.com/JetBrains/kotlin

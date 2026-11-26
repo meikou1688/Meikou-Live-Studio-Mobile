@@ -1,0 +1,8 @@
+{
+  "protocolVersion": 1,
+  "requestId": "9b2efc09-fd30-407d-805f-233074fa292f",
+  "command": "scene.activate",
+  "parameters": {
+    "sceneId": "field-live"
+  }
+}

@@ -1,0 +1,21 @@
+<resources>
+    <string name="idle">Ready</string>
+    <string name="lens">Camera and equivalent focal length</string>
+    <string name="resolution">Resolution</string>
+    <string name="fps">Frames per second</string>
+    <string name="bitrate">Video bitrate (Mbps)</string>
+    <string name="input_device">Audio input</string>
+    <string name="system_default">System default</string>
+    <string name="codec">Video codec</string>
+    <string name="record">Record locally</string>
+    <string name="go_live">Go live</string>
+    <string name="stop_record">Stop recording</string>
+    <string name="stop_live">Stop streaming</string>
+    <string name="diagnostics">Device capabilities</string>
+    <string name="wide">Wide</string>
+    <string name="normal">Standard</string>
+    <string name="tele">Telephoto</string>
+    <string name="copy">Copy report</string>
+    <string name="close">Close</string>
+    <string name="hardware">Device capabilities</string>
+</resources>
