@@ -216,7 +216,22 @@ class Capture(private val ctx:Context, private val preview:Surface?, private val
         }
     }
     private var zoom=initialZoom
-    private var lastTelemetry=""
+    @Volatile private var lastTelemetry=""
+    private var sampleWindowNs=0L
+    private var sampleBytes=0L
+    private var sampleFrames=0
+    private fun reportEncoding(frame:Frame){
+        val now=System.nanoTime()
+        if(sampleWindowNs==0L)sampleWindowNs=now
+        sampleBytes+=frame.bytes.size
+        if(!frame.audio)sampleFrames++
+        val elapsed=now-sampleWindowNs
+        if(elapsed<2_000_000_000L)return
+        val fps=sampleFrames*1e9/elapsed
+        val mbps=sampleBytes*8000.0/elapsed
+        telemetry("%.1f FPS · 編碼 %.2f Mbps".format(java.util.Locale.TAIWAN,fps,mbps)+" · "+lastTelemetry)
+        sampleWindowNs=now;sampleBytes=0;sampleFrames=0
+    }
     private fun applyRequest(){
         val req=builder?:return
         val lens=lens?:return
@@ -322,6 +337,7 @@ class Capture(private val ctx:Context, private val preview:Surface?, private val
         }
     }
     private fun deliver(frame:Frame){
+        reportEncoding(frame)
         val a=frame.audio
         val bytes=frame.bytes
         val pts=frame.pts
