@@ -95,7 +95,16 @@ class BackgroundCheck : Instrumentation() {
                 if(!srt)activity.javaClass.getDeclaredField("additional").apply{isAccessible=true}
                     .set(activity,(1936..1940).map { java.net.URI("rtmp://127.0.0.1:"+it+"/live/integration") })
                 (field(activity,"backgroundLive") as CheckBox).isChecked=true }
-            until { ui { (field(activity,"rates") as Spinner).count>0 && field(activity,"finder")!=null } }
+            until { ui { (field(activity,"lenses") as Spinner).count>0 && field(activity,"finder")!=null } }
+            ui{
+                val sizes=field(activity,"sizes") as Spinner
+                val options=(0 until sizes.count).map{sizes.getItemAtPosition(it) as android.util.Size}
+                android.util.Log.i("MeikouCapture","測試編碼器 "+(field(activity,"codecs") as Spinner).selectedItem+" 可選解析度 "+options)
+                check(options.isNotEmpty()){"此 Android 裝置未公開可用的鏡頭與編碼器組合"}
+                val compact=options.indexOfFirst{it.width in 640..960}
+                if(compact>=0)sizes.setSelection(compact)
+            }
+            until { ui { (field(activity,"rates") as Spinner).count>0 } }
             val method=activity.javaClass.getDeclaredMethod("remoteCommand",String::class.java,org.json.JSONObject::class.java).apply{isAccessible=true}
             PeerServer.start(java.net.InetAddress.getByName("127.0.0.1") as java.net.Inet4Address){action,params->
                 ui{method.invoke(activity,action,params) as org.json.JSONObject}

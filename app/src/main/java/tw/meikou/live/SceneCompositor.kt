@@ -23,6 +23,8 @@ class SceneCompositor(private val ctx:android.content.Context,private val width:
     private var lastRotation=initialLens?.rotation(ctx)?:0
     private var windowConfig:EGLConfig?=null
     private var encodeWindow=EGL14.EGL_NO_SURFACE
+    private var framebuffer=0
+    private var composedTexture=0
     private var cameraProgram=0
     private var cameraFilterProgram=0
     private var effectUniform=0
@@ -175,6 +177,16 @@ class SceneCompositor(private val ctx:android.content.Context,private val width:
         """.trimIndent())
         effectUniform=glGetUniformLocation(cameraFilterProgram,"effect")
         layerProgram=program("precision mediump float; uniform sampler2D image;"+sample)
+        if(encoder!=null){
+            composedTexture=texture(GL_TEXTURE_2D)
+            glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA,width,height,0,GL_RGBA,GL_UNSIGNED_BYTE,null)
+            val ids=IntArray(1)
+            glGenFramebuffers(1,ids,0);framebuffer=ids[0]
+            glBindFramebuffer(GL_FRAMEBUFFER,framebuffer)
+            glFramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D,composedTexture,0)
+            check(glCheckFramebufferStatus(GL_FRAMEBUFFER)==GL_FRAMEBUFFER_COMPLETE)
+            glBindFramebuffer(GL_FRAMEBUFFER,0)
+        }
         cameraTex=texture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES)
         source=SurfaceTexture(cameraTex);val captureSize=lens?.sourceFor(width,height);source.setDefaultBufferSize(captureSize?.width?:width,captureSize?.height?:height);input=Surface(source)
         source.setOnFrameAvailableListener({if(!closing)try{render()}catch(e:Exception){if(!closing)failed()}},handler)
@@ -249,12 +261,7 @@ class SceneCompositor(private val ctx:android.content.Context,private val width:
         }
         val effect=if(selected==null)0 else scene.cameraEffect
         val backdrop=if(effect>=4)layers.lastOrNull{it.kind=="backdrop"}?.let{sprite(it.copy(kind="image"))} else null
-        fun output(window:EGLSurface,record:Boolean){
-            check(EGL14.eglMakeCurrent(display,window,window,context))
-            check(EGL14.eglQuerySurface(display,window,EGL14.EGL_WIDTH,windowSize,0))
-            check(EGL14.eglQuerySurface(display,window,EGL14.EGL_HEIGHT,windowSize,1))
-            if(windowSize[0]<=0 || windowSize[1]<=0)return
-            CameraGeometry.fit(width,height,windowSize[0],windowSize[1],canvasViewport)
+        fun compose(){
             val landscapeInput=selected!=null && rotation%180==0
             val captureSize=selected?.sourceFor(width,height)
             val inputW=if(captureSize==null)width else if(landscapeInput)captureSize.width else captureSize.height
@@ -275,7 +282,7 @@ class SceneCompositor(private val ctx:android.content.Context,private val width:
             draw(cameraFilterProgram,GLES11Ext.GL_TEXTURE_EXTERNAL_OES,cameraTex,cameraUv,cameraTransform)
             glViewport(canvasViewport[0],canvasViewport[1],canvasViewport[2],canvasViewport[3])
             glEnable(GL_BLEND);glBlendFunc(GL_ONE,GL_ONE_MINUS_SRC_ALPHA)
-            val frames=if(record)null else mutableListOf<LayerFrame>()
+            val frames=if(previewWindow==EGL14.EGL_NO_SURFACE)null else mutableListOf<LayerFrame>()
             for((layer,img) in visible){
                 val w=layer.width*width;val h=w/img.aspect
                 val x=if(layer.kind=="ticker")((layer.x*width-time%600000*width/8000f)%(width+w)+(width+w))%(width+w)-w/2 else layer.x*width
@@ -289,9 +296,29 @@ class SceneCompositor(private val ctx:android.content.Context,private val width:
                 if(layer.kind=="video" || layer.kind=="clips")draw(cameraProgram,GLES11Ext.GL_TEXTURE_EXTERNAL_OES,img.tex,cameraUv,clips.getValue(layer.id).transform)
                 else draw(layerProgram,GL_TEXTURE_2D,img.tex,layerUv,identity)
             }
+            if(frames!=null)scenes.previewLayers=frames
+        }
+        if(framebuffer!=0){
+            glBindFramebuffer(GL_FRAMEBUFFER,framebuffer)
+            canvasViewport[0]=0;canvasViewport[1]=0;canvasViewport[2]=width;canvasViewport[3]=height
+            compose()
+            glBindFramebuffer(GL_FRAMEBUFFER,0)
+        }
+        fun output(window:EGLSurface,record:Boolean){
+            check(EGL14.eglMakeCurrent(display,window,window,context))
+            check(EGL14.eglQuerySurface(display,window,EGL14.EGL_WIDTH,windowSize,0))
+            check(EGL14.eglQuerySurface(display,window,EGL14.EGL_HEIGHT,windowSize,1))
+            if(windowSize[0]<=0 || windowSize[1]<=0)return
+            CameraGeometry.fit(width,height,windowSize[0],windowSize[1],canvasViewport)
+            if(framebuffer==0)compose() else{
+                glClearColor(0f,0f,0f,1f);glClear(GL_COLOR_BUFFER_BIT)
+                glViewport(canvasViewport[0],canvasViewport[1],canvasViewport[2],canvasViewport[3])
+                glDisable(GL_BLEND)
+                coords.position(0);coords.put(square);coords.position(0)
+                draw(layerProgram,GL_TEXTURE_2D,composedTexture,cameraUv,identity)
+            }
             if(record)EGLExt.eglPresentationTimeANDROID(display,window,System.nanoTime()-captureEpochNs)
             check(EGL14.eglSwapBuffers(display,window))
-            if(frames!=null)scenes.previewLayers=frames
         }
         if(encodeWindow!=EGL14.EGL_NO_SURFACE && captureEpochNs!=0L)output(encodeWindow,true)
         if(previewWindow!=EGL14.EGL_NO_SURFACE){
@@ -317,6 +344,8 @@ class SceneCompositor(private val ctx:android.content.Context,private val width:
         closing=true
         imageLoader.shutdownNow()
         try{onWorker{
+            if(framebuffer!=0)glDeleteFramebuffers(1,intArrayOf(framebuffer),0)
+            if(composedTexture!=0)glDeleteTextures(1,intArrayOf(composedTexture),0)
             clips.values.forEach{it.close()};clips.clear()
             if(::source.isInitialized){source.setOnFrameAvailableListener(null);source.release()}
             if(::input.isInitialized)input.release()
