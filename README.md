@@ -15,6 +15,8 @@
 6. 使用自己的測試接收端，分別填寫 RTMP／RTMPS 伺服器與串流金鑰，或填入 SRT 主動連線網址，再按「開始直播」。以接收端預覽確認影像、聲音及同步。首次驗收請使用私人測試串流。預設切到背景會停止。需要切換其他 App 時，請在開播前勾選「切換其他 App 時繼續相機直播」，並允許通知。可在通知中停止直播。手機端「已送出影音」只表示發送端狀態。
 7. 在直播預覽中，輕點要移除的素材，再點「移除素材」。也可用單指按住素材往任一邊緣拖曳，看到「放開即可移除」後放手。想保留素材，放手前拖回畫面內即可。鎖定的圖層須先解除鎖定。
 
+獨立測試版在手機上顯示為「Meikou Live 測試版」，可與先前的手機版並存。第一次開啟時會使用自己的空白場景，方便保留原有直播設定。
+
 ## 建置與重現
 
 Windows 使用 Python 3、JDK 17、Gradle 8.13、Android SDK 36、Build Tools 35.0.0 與 Platform Tools。執行 tools/prepare.ps1 會檢查工具、在已設有 sdkmanager 的環境補齊 SDK 套件，再用 Kotlin 編譯、D8、aapt、zipalign、apksigner 建置。可指定 JAVA_HOME、GRADLE_HOME、ANDROID_HOME 或 MEIKOU_TOOLS。Gradle 專案也可供 Android Studio 匯入；此次實際驗證使用離線建置腳本。具備 FFmpeg 與 ffprobe 時，可執行 python tools/test_transport.py。重大版本執行 tools/milestone.ps1 自動建置、測試與備份。

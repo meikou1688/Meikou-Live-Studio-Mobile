@@ -5,12 +5,15 @@ if [[ "$(adb shell getprop ro.kernel.qemu | tr -d '\r')" != 1 ]]; then
     exit 1
 fi
 mkdir -p build
-adb install -r app/build/outputs/apk/debug/app-debug.apk
-adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+variant=${MEIKOU_TEST_VARIANT:-debug}
+package=tw.meikou.live
+if [[ "$variant" == preview ]]; then package=tw.meikou.live.preview; fi
+adb install -r "app/build/outputs/apk/$variant/app-$variant.apk"
+adb install -r "app/build/outputs/apk/androidTest/$variant/app-$variant-androidTest.apk"
 for permission in CAMERA RECORD_AUDIO POST_NOTIFICATIONS; do
-  adb shell pm grant tw.meikou.live "android.permission.$permission"
+  adb shell pm grant "$package" "android.permission.$permission"
 done
-fixture_dir=/sdcard/Android/data/tw.meikou.live/files
+fixture_dir="/sdcard/Android/data/$package/files"
 adb shell mkdir -p "$fixture_dir"
 for color in lime magenta; do
     ffmpeg -v error -y -f lavfi -i "color=c=$color:s=160x96:r=12" -t 1.5 -c:v libx264 -pix_fmt yuv420p -movflags +faststart "build/$color.mp4"
@@ -37,7 +40,7 @@ if [[ $protocol == rtmp ]]; then
 fi
 trap 'kill "$receiver" "${extra_receivers[@]}" 2>/dev/null || true' EXIT
 sleep 1
-adb shell am instrument -w -e protocol "$protocol" tw.meikou.live.test/tw.meikou.live.BackgroundCheck | tee build/instrumentation.txt
+adb shell am instrument -w -e protocol "$protocol" "$package.test/tw.meikou.live.BackgroundCheck" | tee build/instrumentation.txt
 if grep -q 'MEIKOU_CODEC_UNAVAILABLE hevc' build/instrumentation.txt; then
     if [[ $protocol != srt-hevc ]]; then
         echo "Only the optional HEVC hardware run may report an unavailable codec." >&2

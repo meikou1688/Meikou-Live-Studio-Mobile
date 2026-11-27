@@ -45,7 +45,14 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.13'
-      - run: gradle :app:assembleDebug :app:assembleDebugAndroidTest --console=plain
+      - run: gradle -PstudioTestBuildType=preview :app:assembleDebug :app:assemblePreview :app:assemblePreviewAndroidTest --console=plain
+      - name: Check standalone test package
+        run: |
+          tools="$ANDROID_HOME/build-tools/35.0.0"
+          apk=app/build/outputs/apk/preview/app-preview.apk
+          "$tools/apksigner" verify "$apk"
+          "$tools/aapt" dump badging "$apk" > "$RUNNER_TEMP/preview-badging.txt"
+          grep -F "package: name='tw.meikou.live.preview'" "$RUNNER_TEMP/preview-badging.txt"
       - run: |
           sudo apt-get update -qq && sudo apt-get install -y ffmpeg
           python3 -m pip install --quiet opencv-python-headless==4.11.0.86
@@ -59,9 +66,15 @@ jobs:
           target: google_apis
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -no-boot-anim -camera-back emulated -camera-front none
           script: |
-            bash tools/test_background.sh rtmp
-            bash tools/test_background.sh srt
-            bash tools/test_background.sh srt-hevc
+            adb install app/build/outputs/apk/debug/app-debug.apk
+            MEIKOU_TEST_VARIANT=preview bash tools/test_background.sh rtmp
+            MEIKOU_TEST_VARIANT=preview bash tools/test_background.sh srt
+            MEIKOU_TEST_VARIANT=preview bash tools/test_background.sh srt-hevc
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mobile-preview-apk
+          path: app/build/outputs/apk/preview/app-preview.apk
+          if-no-files-found: error
       - uses: actions/upload-artifact@v4
         if: always()
         with:

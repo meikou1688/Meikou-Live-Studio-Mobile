@@ -16,6 +16,16 @@ android {
         targetSdk = 35
         versionCode = 9
         versionName = "0.1.8"
+        manifestPlaceholders["studioLabel"] = "Meikou Live Studio Mobile"
+    }
+    testBuildType = providers.gradleProperty("studioTestBuildType").getOrElse("debug")
+    buildTypes {
+        create("preview") {
+            initWith(getByName("debug"))
+            applicationIdSuffix = ".preview"
+            manifestPlaceholders["studioLabel"] = "Meikou Live 測試版"
+            matchingFallbacks += "debug"
+        }
     }
 }
 
