@@ -29,4 +29,7 @@
     <string name="photo_saved">Photo saved to Pictures/Meikou Live</string>
     <string name="ev">Exposure compensation</string>
     <string name="ev_unsupported">Exposure compensation unavailable</string>
+    <string name="remove_overlay">Remove overlay</string>
+    <string name="release_to_remove">Release to remove</string>
+    <string name="overlay_gestures">Tap an overlay to remove it, or drag it to an edge and release. Pinch or rotate with two fingers.</string>
 </resources>

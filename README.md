@@ -1,6 +1,6 @@
 # Meikou Live Studio Mobile
 
-**首版驗收尚未通過。** 0.1.6 為開發中的跨廠牌驗證版本，尚未對外封裝。Windows USB 安裝請執行 `tools/install-android.cmd`，手機亦可直接開啟 APK。請參閱[首版 Android 功能對照與驗收紀錄](docs/ANDROID-V1-PARITY.md)。
+**首版驗收尚未通過。** 0.1.8 為開發中的跨廠牌驗證版本，尚未對外封裝。Windows USB 安裝請執行 `tools/install-android.cmd`，手機亦可直接開啟 APK。請參閱[首版 Android 功能對照與驗收紀錄](docs/ANDROID-V1-PARITY.md)。
 
 
 適用於具備相機、支援 Android 11 以上的 Android 手機。鏡頭與影音支援程度依裝置公開能力而定。此次交付使用偵錯簽章。解壓版本備份即可取得 APK、完整原始碼與測試紀錄。
@@ -13,6 +13,7 @@
 4. 先以 1280×720、30 FPS、4 Mbps、H.264 測試。連接 INSTA360 接收器後啟動 App，在音訊輸入選單選擇系統列出的裝置。以畫面上的實際收音路由及回放確認。變更裝置後重新開啟 App 可重讀清單。
 5. 按「本機錄影」，切換鏡頭並拍手，停止後從顯示的檔案位置取出 MP4。成功匯出後可在手機相簿或 Movies/Meikou Live 找到錄影。匯出失敗會保留原始檔，備用資料夾為 Android/data/tw.meikou.live/files/Movies，若檔案管理員無法存取，可用 adb pull /sdcard/Android/data/tw.meikou.live/files/Movies。
 6. 使用自己的測試接收端，分別填寫 RTMP／RTMPS 伺服器與串流金鑰，或填入 SRT 主動連線網址，再按「開始直播」。以接收端預覽確認影像、聲音及同步。首次驗收請使用私人測試串流。預設切到背景會停止。需要切換其他 App 時，請在開播前勾選「切換其他 App 時繼續相機直播」，並允許通知。可在通知中停止直播。手機端「已送出影音」只表示發送端狀態。
+7. 在直播預覽中，輕點要移除的素材，再點「移除素材」。也可用單指按住素材往任一邊緣拖曳，看到「放開即可移除」後放手。想保留素材，放手前拖回畫面內即可。鎖定的圖層須先解除鎖定。
 
 ## 建置與重現
 

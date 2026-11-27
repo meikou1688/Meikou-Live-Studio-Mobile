@@ -42,7 +42,11 @@ class Studio:Activity(){
     private fun remoteCommand(action:String,parameters:org.json.JSONObject):org.json.JSONObject{
         when(action){
             "status"->Unit
-            "scene.activate"->scenes.select(scenes.scenes().first{it.id==parameters.getString("sceneId")})
+            "scene.activate"->{
+                val next = scenes.scenes().first { it.id == parameters.getString("sceneId") }
+                sceneEditor.clearSelection()
+                scenes.select(next)
+            }
             "audio.mute"->mute.isChecked=parameters.getBoolean("muted")
             else->error("未知的遙控指令")
         }
@@ -54,6 +58,7 @@ class Studio:Activity(){
     private val portrait get()=resources.configuration.orientation==android.content.res.Configuration.ORIENTATION_PORTRAIT
     private lateinit var rotateButton:Button
     private lateinit var sceneEditor:SceneEditor
+    private lateinit var sizeTouchCanvas: (Int, Int) -> Unit
     private lateinit var preview:SurfaceView
     private lateinit var panel:LinearLayout
     private lateinit var status:TextView
@@ -226,6 +231,7 @@ class Studio:Activity(){
         val size=l.sizes.minByOrNull{kotlin.math.abs(it.width-1280)}?:return
         val w=if(portrait)size.height else size.width
         val h=if(portrait)size.width else size.height
+        sizeTouchCanvas(w, h)
         val view=Viewfinder(this,l,preview.holder.surface,w,h,scenes,settings,{reading.text=it},{if(visible)fallback(l)},{
             finder=null;val next=afterClose;afterClose=null;if(visible && ready)next?.invoke()
         })
@@ -270,19 +276,32 @@ class Studio:Activity(){
         frame.addView(preview,FrameLayout.LayoutParams(-1,-1,Gravity.CENTER))
         val touch=LayerCanvas(this,scenes)
         frame.addView(touch,FrameLayout.LayoutParams(-1,-1,Gravity.CENTER))
-        val viewport=IntArray(4)
-        frame.addOnLayoutChangeListener{_,left,top,right,bottom,_,_,_,_->
-            if(right>left && bottom>top){
-                val landscape=!portrait
-                CameraGeometry.fit(if(landscape)16 else 9,if(landscape)9 else 16,right-left,bottom-top,viewport,fill=landscape)
-                val width=viewport[2]
-                val height=viewport[3]
-                if(touch.layoutParams.width!=width || touch.layoutParams.height!=height){
-                    touch.layoutParams=FrameLayout.LayoutParams(width,height,Gravity.CENTER)
-                    if(!landscape)preview.layoutParams=FrameLayout.LayoutParams(width,height,Gravity.CENTER)
+        var sceneWidth = if (portrait) 9 else 16
+        var sceneHeight = if (portrait) 16 else 9
+        val viewport = IntArray(4)
+        fun layoutPreview() {
+            if (frame.width == 0 || frame.height == 0) return
+            var surfaceWidth = frame.width
+            var surfaceHeight = frame.height
+            if (portrait) {
+                CameraGeometry.fit(9, 16, frame.width, frame.height, viewport)
+                surfaceWidth = viewport[2]
+                surfaceHeight = viewport[3]
+                if (preview.layoutParams.width != surfaceWidth || preview.layoutParams.height != surfaceHeight) {
+                    preview.layoutParams = FrameLayout.LayoutParams(surfaceWidth, surfaceHeight, Gravity.CENTER)
                 }
             }
+            CameraGeometry.fit(sceneWidth, sceneHeight, surfaceWidth, surfaceHeight, viewport, fill = sceneWidth > sceneHeight)
+            if (touch.layoutParams.width != viewport[2] || touch.layoutParams.height != viewport[3]) {
+                touch.layoutParams = FrameLayout.LayoutParams(viewport[2], viewport[3], Gravity.CENTER)
+            }
         }
+        sizeTouchCanvas = { w, h ->
+            sceneWidth = w
+            sceneHeight = h
+            layoutPreview()
+        }
+        frame.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> layoutPreview() }
         root.addView(frame,FrameLayout.LayoutParams(-1,-1))
         if(!portrait)root.addView(bar,FrameLayout.LayoutParams(-1,dp(36),Gravity.TOP))
         page.setOnApplyWindowInsetsListener{v,insets->
@@ -357,7 +376,16 @@ class Studio:Activity(){
         })
         section("場景與素材")
         val transport=LinearLayout(this).apply{gravity=Gravity.CENTER}
-        sceneEditor=SceneEditor(this,scenes,touch,{hide->
+        val removeAction = Button(this).apply {
+            visibility = View.GONE
+            setTextColor(Color.WHITE)
+            background = box("#A51F32", "#FF96A3", 12)
+            setPadding(dp(16), 0, dp(16), 0)
+        }
+        frame.addView(removeAction, FrameLayout.LayoutParams(-2, dp(48), Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply {
+            topMargin = dp(36)
+        })
+        sceneEditor=SceneEditor(this,scenes,touch,removeAction,{hide->
             val state=if(hide && capture==null && !waiting)View.GONE else View.VISIBLE
             bar.visibility=state;transport.visibility=state
         }){capture==null}
@@ -568,6 +596,7 @@ class Studio:Activity(){
             if(!getSystemService(NotificationManager::class.java).areNotificationsEnabled()){status.text="請先在系統設定開啟直播通知";return}
         }
         if(finder!=null){stopPreview{begin(stream)};return}
+        sizeTouchCanvas(p.width, p.height)
         outputStates.clear()
         val folder=getExternalFilesDir(Environment.DIRECTORY_MOVIES)
         val recordFile=!stream || saveLive.isChecked

@@ -2,6 +2,7 @@ package tw.meikou.live
 
 import android.content.Context
 import android.graphics.Canvas
+import android.graphics.Rect
 import android.graphics.Paint
 import android.view.View
 import kotlin.math.*
@@ -27,6 +28,19 @@ class LayerCanvas(ctx:Context, private val scenes:Scenes):View(ctx) {
         val (dx,dy)=local(f,x,y)
         return editable(f.id) && hypot(dx-f.width*width/2,dy-f.height*height/2)<18*density
     }
+    private val visibleBounds = Rect()
+    private val edgeBand = 24 * density
+    private val edgeTravel = 32 * density
+    fun atDropEdge(startX: Float, startY: Float, x: Float, y: Float): Boolean {
+        if (!getLocalVisibleRect(visibleBounds)) return false
+        val dx = x - startX
+        val dy = y - startY
+        return (x <= visibleBounds.left + edgeBand && dx <= -edgeTravel) ||
+            (x >= visibleBounds.right - edgeBand && dx >= edgeTravel) ||
+            (y <= visibleBounds.top + edgeBand && dy <= -edgeTravel) ||
+            (y >= visibleBounds.bottom - edgeBand && dy >= edgeTravel)
+    }
+
     override fun onDraw(canvas:Canvas){
         val f=frame(selection())
         if(f!=null && editable(f.id)){

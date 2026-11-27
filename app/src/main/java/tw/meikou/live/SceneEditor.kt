@@ -7,7 +7,7 @@ import android.view.*
 import android.widget.*
 import kotlin.math.*
 
-class SceneEditor(private val host:Activity,private val scenes:Scenes,private val preview:LayerCanvas,private val cleanPreview:(Boolean)->Unit,private val canPick:()->Boolean){
+class SceneEditor(private val host:Activity,private val scenes:Scenes,private val preview:LayerCanvas,private val removeAction:Button,private val cleanPreview:(Boolean)->Unit,private val canPick:()->Boolean){
     companion object{const val PICK=701;const val PICK_VIDEO=702;const val PICK_SLIDES=706;const val PICK_CLIPS=707;const val PICK_MUSIC=708;const val PICK_GREEN=709;const val PICK_BLUE=710}
     private var selected:String?=null
     private var previousX=0f
@@ -19,7 +19,32 @@ class SceneEditor(private val host:Activity,private val scenes:Scenes,private va
     private var blank=false
     private var startX=0f
     private var startY=0f
+    private val touchSlop = ViewConfiguration.get(host).scaledTouchSlop
+    private var dragged = false
+    private var multiplePointers = false
+
+    fun clearSelection() {
+        selected = null
+        blank = false
+        removeAction.visibility = View.GONE
+        preview.invalidate()
+    }
+
+    private fun remove(id: String) {
+        scenes.layers(scenes.active.layers.filterNot { it.id == id })
+        clearSelection()
+    }
+
+    private fun showRemoveAction(atEdge: Boolean) {
+        removeAction.setText(if (atEdge) R.string.release_to_remove else R.string.remove_overlay)
+        removeAction.isClickable = !atEdge
+        removeAction.visibility = View.VISIBLE
+    }
+
     init{
+        removeAction.setOnClickListener {
+            scenes.active.layers.firstOrNull { it.id == selected && !it.locked }?.let { remove(it.id) }
+        }
         preview.selection={selected}
         preview.setOnTouchListener{_,event->gesture(event)}
     }
@@ -52,11 +77,17 @@ class SceneEditor(private val host:Activity,private val scenes:Scenes,private va
         val list=scenes.scenes()
         AlertDialog.Builder(host).setTitle("場景 · "+scenes.active.name)
             .setItems((list.map{it.name}+"新增場景").toTypedArray()){_,i->
-                selected=null
+                clearSelection()
                 if(i==list.size)prompt("場景名稱"){scenes.create(it)} else scenes.select(list[i])
             }.show()
     }
-    private fun add(v:Overlay){scenes.layers(scenes.active.layers+v);selected=v.id;preview.invalidate();toast("拖曳移動，雙指縮放及旋轉")}
+    private fun add(v:Overlay){
+        clearSelection()
+        scenes.layers(scenes.active.layers+v)
+        selected=v.id
+        preview.invalidate()
+        toast(host.getString(R.string.overlay_gestures))
+    }
     fun media(uri:Uri,video:Boolean){
         try{
             host.contentResolver.takePersistableUriPermission(uri,Intent.FLAG_GRANT_READ_URI_PERMISSION)
@@ -89,6 +120,7 @@ class SceneEditor(private val host:Activity,private val scenes:Scenes,private va
     }
     private fun title(v:Overlay)=when(v.kind){"image"->"圖片／台標";"video"->"影片（靜音循環）";"clock"->"時鐘";"music"->"背景音樂播放清單";"slides"->"圖片播放清單";"clips"->"影片播放清單（靜音）";"date"->"日期";"qr"->"QR Code";"score"->"比分板";"ticker"->"跑馬燈 · "+v.value;else->"文字 · "+v.value}
     fun edit(){
+        removeAction.visibility = View.GONE
         val layers=scenes.active.layers.filterNot{it.kind=="backdrop"}.reversed()
         val choices=listOf("新增文字","新增圖片／台標","新增跑馬燈","新增時鐘","新增影片（靜音循環）","新增日期","新增 QR Code","新增比分板","新增圖片播放清單","新增影片播放清單（靜音）","選擇場景背景音樂")+layers.map{title(it)}
         AlertDialog.Builder(host).setTitle("素材圖層 · "+scenes.active.name).setItems(choices.toTypedArray()){_,i->
@@ -132,7 +164,7 @@ class SceneEditor(private val host:Activity,private val scenes:Scenes,private va
                 1->modify(v.copy(locked=!v.locked))
                 2->scenes.layers(rest+v)
                 3->scenes.layers(listOf(v)+rest)
-                4->{scenes.layers(rest);selected=null}
+                4->remove(v.id)
                 in 5..8->if(v.kind=="score"){
                     val scores=org.json.JSONArray(v.value)
                     val side=if(i==5 || i==7)2 else 3
@@ -145,6 +177,9 @@ class SceneEditor(private val host:Activity,private val scenes:Scenes,private va
     private fun gesture(e:MotionEvent):Boolean{
         if(e.actionMasked==MotionEvent.ACTION_DOWN){
             count=0
+            dragged = false
+            multiplePointers = false
+            removeAction.visibility = View.GONE
             val handle=preview.onHandle(selected,e.x,e.y)
             handleScale=handle
             if(!handle)selected=preview.hit(e.x,e.y)
@@ -164,7 +199,32 @@ class SceneEditor(private val host:Activity,private val scenes:Scenes,private va
             return true
         }
         val layer=scenes.active.layers.firstOrNull{it.id==selected && !it.locked}?:return false
-        if(e.actionMasked==MotionEvent.ACTION_UP || e.actionMasked==MotionEvent.ACTION_CANCEL){scenes.save();count=0;return true}
+        if (e.actionMasked == MotionEvent.ACTION_POINTER_DOWN) {
+            multiplePointers = true
+            removeAction.visibility = View.GONE
+        }
+        val singleMove = !handleScale && !multiplePointers
+        if (hypot(e.x - startX, e.y - startY) > touchSlop) dragged = true
+        if (e.actionMasked == MotionEvent.ACTION_UP || e.actionMasked == MotionEvent.ACTION_CANCEL) {
+            count = 0
+            removeAction.visibility = View.GONE
+            if (e.actionMasked == MotionEvent.ACTION_UP && !multiplePointers) {
+                if (singleMove && dragged && preview.atDropEdge(startX, startY, e.x, e.y)) {
+                    remove(layer.id)
+                    return true
+                }
+                if (!dragged && (!handleScale || preview.hit(e.x, e.y) == layer.id)) {
+                    showRemoveAction(atEdge = false)
+                }
+            }
+            if (dragged || multiplePointers) scenes.save()
+            return true
+        }
+        if (e.actionMasked == MotionEvent.ACTION_MOVE && singleMove) {
+            if (!dragged) return true
+            if (preview.atDropEdge(startX, startY, e.x, e.y)) showRemoveAction(atEdge = true)
+            else removeAction.visibility = View.GONE
+        }
         val n=e.pointerCount.coerceAtMost(2)
         val x=if(n==1)e.x else (e.x+e.getX(1))/2
         val y=if(n==1)e.y else (e.y+e.getY(1))/2

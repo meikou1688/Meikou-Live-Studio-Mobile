@@ -29,4 +29,7 @@
     <string name="photo_saved">照片已存入 Pictures/Meikou Live</string>
     <string name="ev">曝光補償</string>
     <string name="ev_unsupported">此相機未提供曝光補償</string>
+    <string name="remove_overlay">移除素材</string>
+    <string name="release_to_remove">放開即可移除</string>
+    <string name="overlay_gestures">點選素材可移除，拖到邊緣放開也可移除。雙指可縮放或旋轉。</string>
 </resources>

@@ -2,6 +2,10 @@ package tw.meikou.live
 
 import android.app.*
 import android.content.Intent
+import android.graphics.PointF
+import android.graphics.Rect
+import android.view.MotionEvent
+import android.view.View
 import android.os.*
 import android.widget.*
 import java.util.concurrent.Callable
@@ -87,6 +91,73 @@ class BackgroundCheck : Instrumentation() {
                 android.net.Uri.fromFile(it).toString()
             },volume=50))) }
     }
+    private fun checkLiveRemoval(activity: Activity) {
+        val scenes = ui { activity.javaClass.getDeclaredMethod("getScenes").apply { isAccessible = true }.invoke(activity) as Scenes }
+        val editor = ui { field(activity, "sceneEditor") as SceneEditor }
+        val canvas = ui { editor.javaClass.getDeclaredField("preview").apply { isAccessible = true }.get(editor) as LayerCanvas }
+        val button = ui { editor.javaClass.getDeclaredField("removeAction").apply { isAccessible = true }.get(editor) as Button }
+        val visible = Rect()
+        val origin = IntArray(2)
+        ui {
+            check(canvas.getLocalVisibleRect(visible))
+            canvas.getLocationOnScreen(origin)
+        }
+        val center = PointF(visible.exactCenterX(), visible.exactCenterY())
+        fun gesture(vararg points: PointF, cancel: Boolean = false) {
+            val start = SystemClock.uptimeMillis()
+            points.forEachIndexed { i, point ->
+                val action = when (i) {
+                    0 -> MotionEvent.ACTION_DOWN
+                    points.lastIndex -> if (cancel) MotionEvent.ACTION_CANCEL else MotionEvent.ACTION_UP
+                    else -> MotionEvent.ACTION_MOVE
+                }
+                val event = MotionEvent.obtain(start, SystemClock.uptimeMillis(), action, point.x + origin[0], point.y + origin[1], 0)
+                event.source = android.view.InputDevice.SOURCE_TOUCHSCREEN
+                try { sendPointerSync(event) } finally { event.recycle() }
+            }
+            waitForIdleSync()
+        }
+        fun add(id: String, locked: Boolean = false) {
+            ui { scenes.layers(scenes.active.layers + Overlay(id=id, kind="text", value=id, width=.20f, locked=locked)) }
+            until { scenes.previewLayers.any { it.id == id } }
+        }
+        val original = scenes.active.layers.map { it.id }
+        add("lower")
+        add("upper")
+        add("locked", locked = true)
+        gesture(center, center)
+        val target = ui {
+            check(button.isShown && button.text == activity.getString(R.string.remove_overlay))
+            val spot = IntArray(2)
+            button.getLocationOnScreen(spot)
+            PointF(spot[0] - origin[0] + button.width / 2f, spot[1] - origin[1] + button.height / 2f)
+        }
+        gesture(target, target)
+        until { scenes.previewLayers.none { it.id == "upper" } }
+        check(scenes.active.layers.map { it.id } == original + listOf("lower", "locked"))
+
+        val left = PointF(visible.left + 2f, center.y)
+        val right = PointF(visible.right - 2f, center.y)
+        val top = PointF(center.x, visible.top + 2f)
+        val bottom = PointF(center.x, visible.bottom - 2f)
+        gesture(center, left, center, center)
+        check(scenes.active.layers.any { it.id == "lower" })
+        gesture(center, left, left, cancel = true)
+        check(scenes.active.layers.any { it.id == "lower" })
+        // Put each probe at the same on-screen starting point, without disturbing the stream fixtures.
+        for ((index, edge) in listOf(left, right, top, bottom).withIndex()) {
+            val id = "edge-$index"
+            add(id)
+            gesture(center, edge, edge)
+            until { scenes.previewLayers.none { it.id == id } }
+        }
+        val expected = original + listOf("lower", "locked")
+        check(scenes.active.layers.map { it.id } == expected)
+        check(ui { Scenes(activity).active.layers.map { it.id } } == expected)
+        ui { scenes.layers(scenes.active.layers.filter { it.id in original }) }
+        check(ui { (field(activity, "status") as TextView).text.startsWith("直播中") })
+    }
+
     override fun onStart(){
         val result=Bundle()
         try{
@@ -138,6 +209,7 @@ class BackgroundCheck : Instrumentation() {
             checkLandscapeEditing(activity)
             ui { (field(activity,"live") as Button).performClick() }
             until { ui { (field(activity,"status") as TextView).text.startsWith("直播中") } }
+            checkLiveRemoval(activity)
             SystemClock.sleep(2500)
             uiAutomation.performGlobalActionCompatHome()
             until { ui { field(activity,"visible")==false } }
