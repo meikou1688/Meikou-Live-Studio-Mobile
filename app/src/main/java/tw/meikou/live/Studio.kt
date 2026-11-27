@@ -86,7 +86,7 @@ class Studio:Activity(){
     private var additional=listOf<URI>()
     private lateinit var outputSummary:TextView
     private val outputStates=sortedMapOf<Int,String>()
-    private val youtube by lazy { YouTubeChannel(this,{server,key->if(capture==null){address.setText(server);streamKey.setText(key)}}) { status.text=it } }
+    private val youtube by lazy { YouTubeChannel(this,{server,key->if(capture==null){address.setText(server);streamKey.setText(key)}}, { if (capture == null && !waiting) manualYouTubeStream() }) { status.text=it } }
     private fun manualYouTubeStream() {
         val key = destinationField(getString(R.string.youtube_key_hint), true)
         val form = LinearLayout(this).apply {
@@ -430,8 +430,8 @@ class Studio:Activity(){
         button("YouTube 頻道與直播"){
             if(capture!=null && backgroundActive)youtube.connect(liveChat=true)
             else if(capture!=null || waiting || ScreenService.running)status.text="請於開播前設定 YouTube；背景相機直播可開啟聊天室"
-            else choose("YouTube 頻道與直播",listOf("連結頻道",getString(R.string.youtube_manual),"預定直播與分享","建立排程並套用串流設定","查看直播聊天室")){choice->
-                when(choice){0->youtube.connect();1->manualYouTubeStream();2->youtube.connect(true);3->youtube.plan();4->youtube.connect(liveChat=true)}
+            else choose("YouTube 頻道與直播",listOf("連結頻道",getString(R.string.youtube_manual),getString(R.string.youtube_existing),"預定直播與分享","建立排程並套用串流設定","查看直播聊天室")){choice->
+                when(choice){0->youtube.connect();1->manualYouTubeStream();2->youtube.connect(existingStream=true);3->youtube.connect(true);4->youtube.plan();5->youtube.connect(liveChat=true)}
             }
         }
         editOutputs=button("管理多路推流"){editDestinations()}

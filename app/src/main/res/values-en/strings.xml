@@ -40,4 +40,8 @@
     <string name="youtube_oauth_configuration">Google could not verify this installation. Check the Android OAuth package name and signing certificate, or use a YouTube stream key.</string>
     <string name="youtube_oauth_network">Google authorization could not connect. Check the network and try again.</string>
     <string name="youtube_oauth_failed">Google did not complete authorization. Check Google Play services and account access.</string>
+    <string name="youtube_no_result">Google authorization ended without channel access. Select the account again or use the stream key for this broadcast.</string>
+    <string name="youtube_existing">Use an existing channel stream</string>
+    <string name="youtube_no_streams">No usable streams were found. Copy the key from YouTube Live Control Room.</string>
+    <string name="youtube_choose_stream">Select the stream for this broadcast.</string>
 </resources>

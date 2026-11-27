@@ -16,16 +16,18 @@ import java.net.URL
 import javax.net.ssl.HttpsURLConnection
 
 /** Reads the channel the user authorized. Tokens live only for the request. */
-internal class YouTubeChannel(private val activity: Activity, private val applyIngest:(String,String)->Unit, private val show: (String) -> Unit) {
+internal class YouTubeChannel(private val activity: Activity, private val applyIngest:(String,String)->Unit, private val manualStream: ()->Unit, private val show: (String) -> Unit) {
     companion object { const val REQUEST = 704 }
     private val client by lazy { Identity.getAuthorizationClient(activity) }
     private var busy = false
     private var pendingConsent: PendingIntent? = null
     private var resumed = false
+    private var pendingError: (() -> Unit)? = null
 
     fun setResumed(value: Boolean) {
         resumed = value
         if (!value) return
+        pendingError?.let { pendingError = null; it() }
         val consent = pendingConsent ?: return
         pendingConsent = null
         try {
@@ -35,14 +37,15 @@ internal class YouTubeChannel(private val activity: Activity, private val applyI
         }
     }
 
-    private fun authorizationError(code: Int?) {
-        val message = when (code) {
+    private fun authorizationError(code: Int?, missingResult: Boolean = false) {
+        val message = if (missingResult || code == 16 || code == 12501) activity.getString(R.string.youtube_no_result) else when (code) {
             10 -> activity.getString(R.string.youtube_oauth_configuration)
             7 -> activity.getString(R.string.youtube_oauth_network)
             else -> activity.getString(R.string.youtube_oauth_failed)
         }
         finish(message)
-        if (!activity.isFinishing && !activity.isDestroyed && resumed) {
+        if (activity.isFinishing || activity.isDestroyed) return
+        val display = {
             val detail = if (code == 10) {
                 val info = activity.packageManager.getPackageInfo(activity.packageName, PackageManager.GET_SIGNING_CERTIFICATES)
                 val fingerprints = info.signingInfo?.apkContentsSigners.orEmpty().joinToString("\n") { cert ->
@@ -51,15 +54,19 @@ internal class YouTubeChannel(private val activity: Activity, private val applyI
                 "\n\n${activity.packageName}\nSHA-1  $fingerprints"
             } else ""
             AlertDialog.Builder(activity).setTitle("YouTube")
-                .setMessage("$message\nGoogle · ${code ?: "?"}$detail")
+                .setMessage(message + (code?.let { "\nGoogle · $it" } ?: "") + detail)
+                .setNeutralButton(R.string.youtube_manual) { _, _ -> manualStream() }
                 .setPositiveButton(android.R.string.ok, null).show()
+            Unit
         }
+        if (resumed) display() else pendingError = display
     }
 
     private data class Draft(val title:String,val start:String,val privacy:String,val latency:String)
     private var draft:Draft?=null
     private var chat=false
     private var schedule=false
+    private var chooseStream=false
     fun plan(){
         if(busy)return
         val title=android.widget.EditText(activity).apply{hint="直播標題";setSingleLine();filters=arrayOf(android.text.InputFilter.LengthFilter(100))}
@@ -82,9 +89,10 @@ internal class YouTubeChannel(private val activity: Activity, private val applyI
                 },now.year,now.monthValue-1,now.dayOfMonth).show()
             }.show()
     }
-    fun connect(upcoming:Boolean=false,liveChat:Boolean=false) {
+    fun connect(upcoming:Boolean=false,liveChat:Boolean=false,existingStream:Boolean=false) {
         if (busy) return
         busy = true
+        chooseStream=existingStream
         schedule=upcoming
         chat=liveChat
         show("正在向 Google 要求讀取 YouTube 頻道…")
@@ -104,15 +112,18 @@ internal class YouTubeChannel(private val activity: Activity, private val applyI
     }
 
     fun returned(resultCode: Int, data: Intent?) {
-        if (resultCode != Activity.RESULT_OK || data == null) {
-            finish("已取消 YouTube 頻道授權。")
+        if (data == null) {
+            authorizationError(null, missingResult = true)
             return
         }
         try {
-            read(client.getAuthorizationResultFromIntent(data))
+            val result = client.getAuthorizationResultFromIntent(data)
+            if (resultCode == Activity.RESULT_OK) read(result)
+            else authorizationError(null, missingResult = true)
         } catch (error: ApiException) {
             authorizationError(error.statusCode)
         }
+
     }
 
     private fun read(result: AuthorizationResult) {
@@ -124,6 +135,7 @@ internal class YouTubeChannel(private val activity: Activity, private val applyI
         Thread {
             val message = runCatching {
                 draft?.let{return@runCatching create(token,it)}
+                if(chooseStream)return@runCatching existingStreams(token)
                 if(chat)return@runCatching openChat(token)
                 if(schedule)return@runCatching upcoming(token)
                 val url = URL("https://www.googleapis.com/youtube/v3/channels?part=snippet&mine=true")
@@ -161,6 +173,37 @@ internal class YouTubeChannel(private val activity: Activity, private val applyI
             return JSONObject(c.inputStream.bufferedReader().use{it.readText()})
         }finally{c.disconnect()}
     }
+    private fun existingStreams(token: String): String {
+        data class Ingest(val title: String, val address: String, val key: String)
+        val streams = mutableListOf<Ingest>()
+        var page = ""
+        do {
+            val response = api(token, "liveStreams?part=snippet,cdn&mine=true&maxResults=50" + page)
+            val items = response.getJSONArray("items")
+            for (index in 0 until items.length()) {
+                val item = items.getJSONObject(index)
+                val info = item.optJSONObject("cdn")?.optJSONObject("ingestionInfo") ?: continue
+                val address = info.optString("rtmpsIngestionAddress")
+                val key = info.optString("streamName")
+                if (key.isBlank() || runCatching { streamDestination(address,key).scheme }.getOrNull() != "rtmps") continue
+                streams += Ingest(item.getJSONObject("snippet").getString("title"), address, key)
+            }
+            page = response.optString("nextPageToken").let { if (it.isBlank()) "" else "&pageToken=" + android.net.Uri.encode(it) }
+        } while (page.isNotEmpty())
+        if (streams.isEmpty()) return activity.getString(R.string.youtube_no_streams)
+        activity.runOnUiThread {
+            if (!activity.isFinishing && !activity.isDestroyed) {
+                AlertDialog.Builder(activity).setTitle(R.string.youtube_existing)
+                    .setItems(streams.map { it.title }.toTypedArray()) { _, index ->
+                        val stream = streams[index]
+                        applyIngest(stream.address, stream.key)
+                        show(activity.getString(R.string.youtube_ready))
+                    }.setNegativeButton(android.R.string.cancel, null).show()
+            }
+        }
+        return activity.getString(R.string.youtube_choose_stream)
+    }
+
     private fun create(token:String,request:Draft):String{
         val event=JSONObject().put("snippet",JSONObject().put("title",request.title).put("scheduledStartTime",request.start))
             .put("status",JSONObject().put("privacyStatus",request.privacy))

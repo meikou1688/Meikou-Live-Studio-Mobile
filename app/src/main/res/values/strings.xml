@@ -40,4 +40,8 @@
     <string name="youtube_oauth_configuration">Google 無法驗證這個安裝版本。請核對 OAuth 用戶端的套件名稱與簽署憑證；你也可以使用 YouTube 串流金鑰。</string>
     <string name="youtube_oauth_network">Google 授權連線失敗，請檢查網路後重試。</string>
     <string name="youtube_oauth_failed">Google 未完成授權。請確認 Google Play 服務與這個帳號的授權狀態。</string>
+    <string name="youtube_no_result">Google 授權視窗已結束，未取得頻道授權。可重新選擇帳號，或改用這場直播的串流金鑰。</string>
+    <string name="youtube_existing">套用頻道既有串流</string>
+    <string name="youtube_no_streams">這個頻道沒有可套用的串流。請從 YouTube 直播控制中心複製金鑰。</string>
+    <string name="youtube_choose_stream">請選擇這場直播使用的串流。</string>
 </resources>

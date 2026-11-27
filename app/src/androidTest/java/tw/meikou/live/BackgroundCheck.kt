@@ -190,11 +190,39 @@ class BackgroundCheck : Instrumentation() {
         check(ui { (field(activity, "status") as TextView).text.startsWith("直播中") })
     }
 
+    private fun checkYouTubeFallback(activity: Activity) {
+        fun dialogButton(id: Int, label: Int): Button? =
+            android.view.inspector.WindowInspector.getGlobalWindowViews().asReversed()
+                .mapNotNull { it.findViewById<Button>(id) }
+                .firstOrNull { it.isShown && it.text == activity.getString(label) }
+        ui {
+            val callback = activity.javaClass.getDeclaredMethod("onActivityResult", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType, Intent::class.java)
+            callback.isAccessible = true
+            callback.invoke(activity, YouTubeChannel.REQUEST, Activity.RESULT_CANCELED, null)
+            check((field(activity,"status") as TextView).text == activity.getString(R.string.youtube_no_result))
+        }
+        until { ui { dialogButton(android.R.id.button3, R.string.youtube_manual) != null } }
+        ui { dialogButton(android.R.id.button3, R.string.youtube_manual)!!.performClick() }
+        until { ui { dialogButton(android.R.id.button1, R.string.youtube_apply) != null } }
+        ui {
+            val button = dialogButton(android.R.id.button1, R.string.youtube_apply)!!
+            val container = button.rootView.findViewById<android.view.ViewGroup>(android.R.id.custom)
+            val form = container.getChildAt(0) as LinearLayout
+            val key = (0 until form.childCount).map { form.getChildAt(it) }.filterIsInstance<EditText>().single()
+            key.setText("test-only")
+            button.performClick()
+            check((field(activity,"address") as EditText).text.toString() == "rtmps://a.rtmps.youtube.com:443/live2")
+            check((field(activity,"streamKey") as EditText).text.toString() == "test-only")
+            check(field(activity, "capture") == null)
+        }
+    }
+
     override fun onStart(){
         val result=Bundle()
         try{
             val launch=Intent(targetContext,Studio::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             val activity=startActivitySync(launch)
+            if (!srt) checkYouTubeFallback(activity)
             ui { (field(activity,"address") as EditText).setText(if(srt)"srt://10.0.2.2:19001/integration" else "rtmp://127.0.0.1:1935/live")
                 if(hevc)(field(activity,"codecs") as Spinner).setSelection(1)
                 (field(activity,"streamKey") as EditText).setText(if(srt)"" else "integration")
