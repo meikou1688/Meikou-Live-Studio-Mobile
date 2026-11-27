@@ -60,3 +60,9 @@ YouTube 可在手機選擇標題、當地日期時間、隱私與延遲；使用
 下一輪開發加入 YouTube 直播聊天室唯讀檢視，依服務回傳間隔更新留言，關閉即停止讀取；頻道權限及觀眾實際留言仍待授權實測。新增圖片定時輪播與靜音影片循環播放清單，透過系統檔案選擇器匯入，可與其他素材一起拖曳縮放，並納入相同的影音合成核心。
 
 加入場景背景音樂清單，解碼為 PCM、聲道混合、重採樣到 48 kHz 後與麥克風混入 AAC，可在場景內調音量或靜音。相機模式的主要 RTMP 路徑斷線時保留錄影與其他輸出，重連後補送編碼參數與關鍵影格。
+
+## Android 0.1.9 測試版的簽署與頻道授權
+
+此次交付使用獨立套件 `tw.meikou.live.beta` 及固定 Beta 憑證。Google Auth Platform 的 Android 用戶端須登記這個套件與 SHA-1 `3B:1D:9E:AA:A2:14:AF:09:A0:F8:E2:20:E5:09:F1:10:C4:F6:92:39`。實際帳號完成 Google 同意並讀取到頻道，才可認定帳號驗收通過。
+
+驗證建置產物後，在持有 Beta 簽署憑證的環境執行 `python tools/sign_test_apk.py --beta app-preview.apk Meikou-Live-Mobile-beta.apk`。可透過 `MEIKOU_BETA_SIGNING_DIR` 指定安全的憑證目錄。工具會核對 APK 套件名稱與簽署憑證指紋。CI 的臨時簽章只供模擬器測試。0.1.8 場景保存在原 App，新安裝的 Beta 使用獨立場景。
