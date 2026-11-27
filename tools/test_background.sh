@@ -98,6 +98,12 @@ assert np.percentile(camera.max(axis=2)-camera.min(axis=2),99)<12,"camera graysc
 assert camera.std()>3,"camera sample lacks visible detail"
 print("Decoded camera grayscale; separate scene overlays retain their colors")
 import subprocess
+marker_rgb=subprocess.check_output(["ffmpeg","-v","error","-i","build/background.mkv","-an",
+    "-vf","fps=8,crop=4:4:iw*0.83:ih*0.5,scale=1:1","-pix_fmt","rgb24","-f","rawvideo","-"])
+marker_pixels=np.frombuffer(marker_rgb,dtype="uint8").reshape(-1,3)
+yellow=(marker_pixels[:,0]>180) & (marker_pixels[:,1]>180) & (marker_pixels[:,2]<70)
+assert (yellow[:-1] & yellow[1:]).any() and not yellow[-8:].any(), "live edge removal did not reach the receiver"
+print("Decoded the yellow overlay on air and verified its removal while streaming continued")
 pixels=subprocess.check_output(["ffmpeg","-v","error","-i","build/background.mkv","-an","-vf",
     "fps=2,crop=4:4:iw*0.18:ih*0.5,scale=1:1","-pix_fmt","rgb24","-f","rawvideo","-"])
 colors=np.frombuffer(pixels,dtype="uint8").reshape((-1,3)).astype(int)

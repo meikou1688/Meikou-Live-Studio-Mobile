@@ -5,7 +5,6 @@ import android.content.Intent
 import android.graphics.PointF
 import android.graphics.Rect
 import android.view.MotionEvent
-import android.view.View
 import android.os.*
 import android.widget.*
 import java.util.concurrent.Callable
@@ -82,7 +81,10 @@ class BackgroundCheck : Instrumentation() {
             pcm.putShort(tone).putShort(tone)
         }
         wav.writeBytes(pcm.array())
+        val marker = android.graphics.Bitmap.createBitmap(64,64,android.graphics.Bitmap.Config.ARGB_8888)
+        marker.eraseColor(android.graphics.Color.YELLOW)
         ui { scenes.cameraEffect(1);scenes.layers(scenes.active.layers+listOf(
+            Overlay(id="on-air-marker", kind="image", value="", x=.83f, y=.50f, width=.09f, bitmap=marker),
             Overlay(kind="slides",value="",x=.18f,y=.5f,width=.18f,items=slides,slideSeconds=2),
             Overlay(kind="clips",value="",items=listOf("lime.mp4","magenta.mp4").map{
                 android.net.Uri.fromFile(java.io.File(targetContext.getExternalFilesDir(null),it)).toString()
@@ -100,7 +102,7 @@ class BackgroundCheck : Instrumentation() {
         val origin = IntArray(2)
         ui {
             check(canvas.getLocalVisibleRect(visible))
-            canvas.getLocationOnScreen(origin)
+            canvas.getLocationInWindow(origin)
         }
         val center = PointF(visible.exactCenterX(), visible.exactCenterY())
         fun gesture(vararg points: PointF, cancel: Boolean = false) {
@@ -113,23 +115,51 @@ class BackgroundCheck : Instrumentation() {
                 }
                 val event = MotionEvent.obtain(start, SystemClock.uptimeMillis(), action, point.x + origin[0], point.y + origin[1], 0)
                 event.source = android.view.InputDevice.SOURCE_TOUCHSCREEN
-                try { sendPointerSync(event) } finally { event.recycle() }
+                try { ui { activity.dispatchTouchEvent(event) } } finally { event.recycle() }
             }
             waitForIdleSync()
+        }
+        fun pinchTowardEdge() {
+            val start = SystemClock.uptimeMillis()
+            val ids = Array(2) { index -> MotionEvent.PointerProperties().apply { id = index; toolType = MotionEvent.TOOL_TYPE_FINGER } }
+            fun send(action: Int, vararg positions: PointF) {
+                val coords = positions.map { point -> MotionEvent.PointerCoords().apply {
+                    x = point.x + origin[0]; y = point.y + origin[1]; pressure = 1f; size = 1f
+                } }.toTypedArray()
+                val event = MotionEvent.obtain(start, SystemClock.uptimeMillis(), action, coords.size,
+                    ids, coords, 0, 0, 1f, 1f, 0, 0, android.view.InputDevice.SOURCE_TOUCHSCREEN, 0)
+                try { ui { activity.dispatchTouchEvent(event) } } finally { event.recycle() }
+            }
+            val second = PointF(center.x + 30, center.y + 20)
+            val end = PointF(visible.left + 2f, center.y)
+            val endSecond = PointF(end.x + 60, end.y + 30)
+            send(MotionEvent.ACTION_DOWN, center)
+            send(MotionEvent.ACTION_POINTER_DOWN or (1 shl MotionEvent.ACTION_POINTER_INDEX_SHIFT), center, second)
+            send(MotionEvent.ACTION_MOVE, end, endSecond)
+            send(MotionEvent.ACTION_POINTER_UP or (1 shl MotionEvent.ACTION_POINTER_INDEX_SHIFT), end, endSecond)
+            send(MotionEvent.ACTION_UP, end)
         }
         fun add(id: String, locked: Boolean = false) {
             ui { scenes.layers(scenes.active.layers + Overlay(id=id, kind="text", value=id, width=.20f, locked=locked)) }
             until { scenes.previewLayers.any { it.id == id } }
         }
+        // Leave the yellow marker on air long enough for an independent receiver to decode it.
+        until { scenes.previewLayers.any { it.id == "on-air-marker" } }
+        SystemClock.sleep(1000)
+        val markerCenter = ui { PointF(.83f * canvas.width, .50f * canvas.height) }
+        val rightEdge = PointF(visible.right - 2f, markerCenter.y)
+        gesture(markerCenter, rightEdge, rightEdge)
+        until { scenes.previewLayers.none { it.id == "on-air-marker" } }
         val original = scenes.active.layers.map { it.id }
         add("lower")
         add("upper")
         add("locked", locked = true)
         gesture(center, center)
+        until { ui { button.isShown && button.width > 0 && !button.isLayoutRequested } }
         val target = ui {
             check(button.isShown && button.text == activity.getString(R.string.remove_overlay))
             val spot = IntArray(2)
-            button.getLocationOnScreen(spot)
+            button.getLocationInWindow(spot)
             PointF(spot[0] - origin[0] + button.width / 2f, spot[1] - origin[1] + button.height / 2f)
         }
         gesture(target, target)
@@ -151,7 +181,9 @@ class BackgroundCheck : Instrumentation() {
             gesture(center, edge, edge)
             until { scenes.previewLayers.none { it.id == id } }
         }
-        val expected = original + listOf("lower", "locked")
+        add("pinch")
+        pinchTowardEdge()
+        val expected = original + listOf("lower", "locked", "pinch")
         check(scenes.active.layers.map { it.id } == expected)
         check(ui { Scenes(activity).active.layers.map { it.id } } == expected)
         ui { scenes.layers(scenes.active.layers.filter { it.id in original }) }
