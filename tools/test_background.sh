@@ -78,7 +78,8 @@ recording=$(adb shell 'ls -t "/sdcard/Movies/Meikou Live/"Meikou-*.mp4' | head -
 adb pull "$recording" "build/$protocol-local.mp4"
 ffmpeg -v error -xerror -i "build/$protocol-local.mp4" -map 0:a -map 0:v -f null -
 ffmpeg -v error -xerror -i build/background.mkv -f null -
-ffmpeg -v error -y -ss 4 -i build/background.mkv -frames:v 1 build/overlay.png
+# The live overlap probes temporarily cover the QR. Verify its geometry in the settled scene.
+ffmpeg -v error -y -sseof -2 -i build/background.mkv -frames:v 1 build/overlay.png
 python3 - <<'PY'
 import cv2
 import numpy as np
