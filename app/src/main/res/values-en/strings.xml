@@ -32,4 +32,12 @@
     <string name="remove_overlay">Remove overlay</string>
     <string name="release_to_remove">Release to remove</string>
     <string name="overlay_gestures">Tap an overlay to remove it, or drag it to an edge and release. Pinch or rotate with two fingers.</string>
+    <string name="youtube_manual">Use a YouTube stream key</string>
+    <string name="youtube_key_hint">Paste the stream key for this broadcast</string>
+    <string name="youtube_key_help">Copy the key from YouTube Live Control Room. Apply it, then return to the preview and tap Go live.</string>
+    <string name="youtube_apply">Apply</string>
+    <string name="youtube_ready">YouTube RTMPS is ready. Tap Go live when ready.</string>
+    <string name="youtube_oauth_configuration">Google could not verify this installation. Check the Android OAuth package name and signing certificate, or use a YouTube stream key.</string>
+    <string name="youtube_oauth_network">Google authorization could not connect. Check the network and try again.</string>
+    <string name="youtube_oauth_failed">Google did not complete authorization. Check Google Play services and account access.</string>
 </resources>

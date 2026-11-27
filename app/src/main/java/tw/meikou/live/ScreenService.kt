@@ -49,10 +49,10 @@ class ScreenService:Service(){
             instance=this
             current=Capture(this,null,profile,Scenes(this),null,input,1f,0,CameraSettings(),{},target,urls,{_,_->},file,
                 {mode->main.post{notices.notify(11,notice(when(mode){1->"正在傳送螢幕與麥克風";3->"網路中斷，正在重新連線";else->"正在錄製螢幕與麥克風"}))}},
-                {ok,_,recorded->
+                {ok,_,recorded,issue->
                     val saved=if(recorded && file!=null)saveMovie(file) else null
                     main.post{
-                        android.widget.Toast.makeText(this,saved?.let{"已儲存 "+it}?:if(ok)"已結束螢幕分享" else "螢幕擷取或網路傳輸未完成",android.widget.Toast.LENGTH_LONG).show()
+                        android.widget.Toast.makeText(this,issue ?: saved?.let{"已儲存 "+it}?:if(ok)"已結束螢幕分享" else "螢幕擷取或網路傳輸未完成",android.widget.Toast.LENGTH_LONG).show()
                         current=null;running=false;if(instance===this)instance=null;stopForeground(STOP_FOREGROUND_REMOVE);stopSelf()
                     }
                 },projection).also{

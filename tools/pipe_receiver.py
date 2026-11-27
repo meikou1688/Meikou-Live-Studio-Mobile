@@ -34,7 +34,9 @@ def receive(fixture, dest):
                     name=payload[3:3+int.from_bytes(payload[1:3],"big")].decode()
                     if name=="connect":reply(string("_result")+number(1)+b'\x05\x05')
                     elif name=="createStream":reply(string("_result")+number(2)+b'\x05'+number(1))
-                    elif name=="publish":reply(string("onStatus")+number(0)+b'\x05\x03\0\x04code'+string("NetStream.Publish.Start")+b'\0\0\x09',1)
+                    elif name=="publish":
+                        for code in ("NetStream.Publish.Notify", "NetStream.Publish.Start"):
+                            reply(string("onStatus")+number(0)+b'\x05\x03\0\x04code'+string(code)+b'\0\0\x09',1)
                     else:raise ValueError(name)
                 else:
                     assert kind in (8,9) and sid==1

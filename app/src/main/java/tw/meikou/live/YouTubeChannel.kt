@@ -1,6 +1,10 @@
 package tw.meikou.live
 
+import android.app.AlertDialog
 import android.app.Activity
+import android.app.PendingIntent
+import android.content.pm.PackageManager
+import java.security.MessageDigest
 import android.content.Intent
 import com.google.android.gms.auth.api.identity.AuthorizationRequest
 import com.google.android.gms.auth.api.identity.AuthorizationResult
@@ -16,6 +20,41 @@ internal class YouTubeChannel(private val activity: Activity, private val applyI
     companion object { const val REQUEST = 704 }
     private val client by lazy { Identity.getAuthorizationClient(activity) }
     private var busy = false
+    private var pendingConsent: PendingIntent? = null
+    private var resumed = false
+
+    fun setResumed(value: Boolean) {
+        resumed = value
+        if (!value) return
+        val consent = pendingConsent ?: return
+        pendingConsent = null
+        try {
+            activity.startIntentSenderForResult(consent.intentSender, REQUEST, null, 0, 0, 0)
+        } catch (_: android.content.IntentSender.SendIntentException) {
+            finish("無法開啟 Google 授權視窗，請重試。")
+        }
+    }
+
+    private fun authorizationError(code: Int?) {
+        val message = when (code) {
+            10 -> activity.getString(R.string.youtube_oauth_configuration)
+            7 -> activity.getString(R.string.youtube_oauth_network)
+            else -> activity.getString(R.string.youtube_oauth_failed)
+        }
+        finish(message)
+        if (!activity.isFinishing && !activity.isDestroyed && resumed) {
+            val detail = if (code == 10) {
+                val info = activity.packageManager.getPackageInfo(activity.packageName, PackageManager.GET_SIGNING_CERTIFICATES)
+                val fingerprints = info.signingInfo?.apkContentsSigners.orEmpty().joinToString("\n") { cert ->
+                    MessageDigest.getInstance("SHA-1").digest(cert.toByteArray()).joinToString(":") { "%02X".format(it) }
+                }
+                "\n\n${activity.packageName}\nSHA-1  $fingerprints"
+            } else ""
+            AlertDialog.Builder(activity).setTitle("YouTube")
+                .setMessage("$message\nGoogle · ${code ?: "?"}$detail")
+                .setPositiveButton(android.R.string.ok, null).show()
+        }
+    }
 
     private data class Draft(val title:String,val start:String,val privacy:String,val latency:String)
     private var draft:Draft?=null
@@ -52,17 +91,15 @@ internal class YouTubeChannel(private val activity: Activity, private val applyI
         val request = AuthorizationRequest.builder()
             .setRequestedScopes(listOf(Scope(if(draft!=null)"https://www.googleapis.com/auth/youtube.force-ssl" else "https://www.googleapis.com/auth/youtube.readonly")))
             .build()
-        client.authorize(request).addOnSuccessListener(activity) { result ->
+        client.authorize(request).addOnSuccessListener { result ->
+            if (activity.isFinishing || activity.isDestroyed) return@addOnSuccessListener
             val consent = result.pendingIntent
             if (result.hasResolution() && consent != null) {
-                try {
-                    activity.startIntentSenderForResult(consent.intentSender, REQUEST, null, 0, 0, 0)
-                } catch (_: android.content.IntentSender.SendIntentException) {
-                    finish("無法開啟 Google 授權視窗，請重試。")
-                }
+                pendingConsent = consent
+                setResumed(resumed)
             } else read(result)
-        }.addOnFailureListener(activity) { error ->
-            finish("Google 授權失敗（代碼 ${(error as? ApiException)?.statusCode ?: "未知"}）。請確認 Google Play 服務與網路連線。")
+        }.addOnFailureListener { error ->
+            authorizationError((error as? ApiException)?.statusCode)
         }
     }
 
@@ -74,7 +111,7 @@ internal class YouTubeChannel(private val activity: Activity, private val applyI
         try {
             read(client.getAuthorizationResultFromIntent(data))
         } catch (error: ApiException) {
-            finish("Google 授權失敗（代碼 ${error.statusCode}）。")
+            authorizationError(error.statusCode)
         }
     }
 

@@ -27,17 +27,26 @@ class Rtmp(private val endpoint: URI) : Closeable {
         require(path.contains('/') && !path.endsWith('/'))
         val app = path.substringBeforeLast('/')
         val key = path.substringAfterLast('/') + (endpoint.rawQuery?.let { "?" + it } ?: "")
-        val s = if (tls) SSLSocketFactory.getDefault().createSocket() else Socket()
-        socket = s
+        val port = if (endpoint.port > 0) endpoint.port else if (tls) 443 else 1935
+        val tcp = Socket()
+        socket = tcp
         check(!closed)
-        s.connect(InetSocketAddress(host, if(endpoint.port>0) endpoint.port else if(tls) 443 else 1935),7000)
-        s.soTimeout=8000
-        if(s is SSLSocket) {
-            val params=s.sslParameters
-            params.endpointIdentificationAlgorithm="HTTPS"
-            s.sslParameters=params
-            s.startHandshake()
-        }
+        tcp.connect(InetSocketAddress(host, port), 7000)
+        tcp.soTimeout = 8000
+        val s = if (tls) {
+            val factory = SSLSocketFactory.getDefault() as SSLSocketFactory
+            val secure = factory.createSocket(tcp, host, port, true) as SSLSocket
+            socket = secure
+            secure.soTimeout = 8000
+            secure.sslParameters = secure.sslParameters.apply {
+                endpointIdentificationAlgorithm = "HTTPS"
+                if (!host.contains(':') && !host.matches(Regex("[0-9.]+"))) {
+                    serverNames = listOf(SNIHostName(host))
+                }
+            }
+            secure.startHandshake()
+            secure
+        } else tcp
         input=DataInputStream(s.getInputStream().buffered())
         output=DataOutputStream(s.getOutputStream().buffered())
         publish(app,key,endpoint.scheme+"://"+endpoint.rawAuthority+"/"+app)
@@ -59,10 +68,14 @@ class Rtmp(private val endpoint: URI) : Closeable {
         command(stream,"publish",0.0,null,key,"live")
         while(true) {
             val cmd=readCommand() ?: continue
+            if (cmd.firstOrNull() == "_error") throw RtmpRejected(publishing = true)
             if(cmd.firstOrNull()=="onStatus") {
-                val status=(cmd.last() as? Map<*,*>)?.get("code")
-                check(status=="NetStream.Publish.Start")
-                break
+                val info = cmd.lastOrNull() as? Map<*, *> ?: continue
+                when {
+                    info["code"] == "NetStream.Publish.Start" -> break
+                    info["level"] == "error" || info["code"] in setOf("NetStream.Publish.BadName", "NetStream.Publish.Denied", "NetStream.Failed") ->
+                        throw RtmpRejected(publishing = true)
+                }
             }
         }
         socket?.soTimeout=0
@@ -73,7 +86,7 @@ class Rtmp(private val endpoint: URI) : Closeable {
         while(true) {
             val args=readCommand() ?: continue
             if(args.getOrNull(1)==tx) {
-                check(args.first()!="_error")
+                if (args.first() == "_error") throw RtmpRejected(publishing = false)
                 if(args.first()=="_result") return args
             }
         }
@@ -141,3 +154,15 @@ class Rtmp(private val endpoint: URI) : Closeable {
 }
 internal fun buffer(f:(DataOutputStream)->Unit):ByteArray=ByteArrayOutputStream().let{f(DataOutputStream(it));it.toByteArray()}
 
+
+internal class RtmpRejected(val publishing: Boolean) : IOException()
+
+// Never forward server descriptions, URLs or exception messages: they can contain stream keys.
+internal fun rtmpFailureText(error: Exception): String = when (error) {
+    is RtmpRejected -> if (error.publishing) "伺服器拒絕發布。請確認這場直播的串流金鑰，以及是否已有其他編碼器使用。" else "伺服器拒絕連線。請核對推流網址與伺服器授權。"
+    is UnknownHostException -> "找不到推流伺服器，請檢查主機名稱與網路。"
+    is SSLException -> "RTMPS 加密連線失敗，請核對伺服器網址、連接埠及憑證。"
+    is SocketTimeoutException -> "推流伺服器回應逾時，請檢查網路與連接埠。"
+    is ConnectException, is NoRouteToHostException -> "無法連上推流伺服器，請檢查網路與連接埠。"
+    else -> "伺服器未確認發布，請核對推流網址、連接埠與串流金鑰。"
+}

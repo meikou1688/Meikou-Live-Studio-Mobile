@@ -32,4 +32,12 @@
     <string name="remove_overlay">移除素材</string>
     <string name="release_to_remove">放開即可移除</string>
     <string name="overlay_gestures">點選素材可移除，拖到邊緣放開也可移除。雙指可縮放或旋轉。</string>
+    <string name="youtube_manual">使用 YouTube 串流金鑰</string>
+    <string name="youtube_key_hint">請貼上這場直播的串流金鑰</string>
+    <string name="youtube_key_help">從 YouTube 直播控制中心複製串流金鑰。套用後，回到主畫面按「開始直播」。</string>
+    <string name="youtube_apply">套用</string>
+    <string name="youtube_ready">已套用 YouTube RTMPS 設定，準備好即可開始直播。</string>
+    <string name="youtube_oauth_configuration">Google 無法驗證這個安裝版本。請核對 OAuth 用戶端的套件名稱與簽署憑證；你也可以使用 YouTube 串流金鑰。</string>
+    <string name="youtube_oauth_network">Google 授權連線失敗，請檢查網路後重試。</string>
+    <string name="youtube_oauth_failed">Google 未完成授權。請確認 Google Play 服務與這個帳號的授權狀態。</string>
 </resources>

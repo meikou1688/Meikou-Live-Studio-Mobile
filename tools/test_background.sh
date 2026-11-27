@@ -7,7 +7,7 @@ fi
 mkdir -p build
 variant=${MEIKOU_TEST_VARIANT:-debug}
 package=tw.meikou.live
-if [[ "$variant" == preview ]]; then package=tw.meikou.live.preview; fi
+if [[ "$variant" == preview ]]; then package=tw.meikou.live.beta; fi
 adb install -r "app/build/outputs/apk/$variant/app-$variant.apk"
 adb install -r "app/build/outputs/apk/androidTest/$variant/app-$variant-androidTest.apk"
 for permission in CAMERA RECORD_AUDIO POST_NOTIFICATIONS; do

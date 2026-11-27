@@ -87,6 +87,31 @@ class Studio:Activity(){
     private lateinit var outputSummary:TextView
     private val outputStates=sortedMapOf<Int,String>()
     private val youtube by lazy { YouTubeChannel(this,{server,key->if(capture==null){address.setText(server);streamKey.setText(key)}}) { status.text=it } }
+    private fun manualYouTubeStream() {
+        val key = destinationField(getString(R.string.youtube_key_hint), true)
+        val form = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), 0)
+            addView(TextView(this@Studio).apply { setText(R.string.youtube_key_help) })
+            addView(key)
+        }
+        val dialog = AlertDialog.Builder(this).setTitle(R.string.youtube_manual)
+            .setView(form).setNegativeButton(android.R.string.cancel, null)
+            .setPositiveButton(R.string.youtube_apply, null).create()
+        dialog.show()
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+            val server = "rtmps://a.rtmps.youtube.com:443/live2"
+            val secret = key.text.toString().trim()
+            if (secret.isEmpty() || secret.any { it.isWhitespace() } || runCatching { streamDestination(server, secret) }.isFailure) {
+                key.error = getString(R.string.youtube_key_hint)
+            } else {
+                address.setText(server)
+                streamKey.setText(secret)
+                dialog.dismiss()
+                status.text = getString(R.string.youtube_ready)
+            }
+        }
+    }
     private lateinit var editOutputs:Button
     private var extraFields=listOf<Pair<String,String>>()
     private fun destinationField(hintText:String,hide:Boolean)=EditText(this).apply{
@@ -405,8 +430,8 @@ class Studio:Activity(){
         button("YouTube 頻道與直播"){
             if(capture!=null && backgroundActive)youtube.connect(liveChat=true)
             else if(capture!=null || waiting || ScreenService.running)status.text="請於開播前設定 YouTube；背景相機直播可開啟聊天室"
-            else choose("YouTube 頻道與直播",listOf("連結頻道","預定直播與分享","建立排程並套用串流設定","查看直播聊天室")){choice->
-                when(choice){0->youtube.connect();1->youtube.connect(true);2->youtube.plan();3->youtube.connect(liveChat=true)}
+            else choose("YouTube 頻道與直播",listOf("連結頻道",getString(R.string.youtube_manual),"預定直播與分享","建立排程並套用串流設定","查看直播聊天室")){choice->
+                when(choice){0->youtube.connect();1->manualYouTubeStream();2->youtube.connect(true);3->youtube.plan();4->youtube.connect(liveChat=true)}
             }
         }
         editOutputs=button("管理多路推流"){editDestinations()}
@@ -576,9 +601,9 @@ class Studio:Activity(){
         if(waiting){cancelRetry();status.text="已取消重新連線";live.text=ui("go_live");return}
         if(capture!=null){ending=true;capture?.stop();status.text="正在停止";return}
         if(!ready || !granted()){status.text="請確認預覽區及相機、麥克風權限";return}
-        val l=selected?:return
-        val size=sizes.selectedItem as? android.util.Size?:return
-        val fps=rates.selectedItem as? Int?:return
+        val l=selected?:run { status.text="尚未就緒，請確認相機權限並選擇可用鏡頭。"; return }
+        val size=sizes.selectedItem as? android.util.Size?:run { status.text="請在影音設定選擇此鏡頭支援的解析度。"; return }
+        val fps=rates.selectedItem as? Int?:run { status.text="請在影音設定選擇支援的影格率。"; return }
         if(fps !in l.supportedRates[size].orEmpty()){status.text="此鏡頭無法使用選取的解析度與影格率";return}
         val mbps=bits.selectedItem as? Int?:return
         if(!supported(size,fps,mbps)){status.text="此裝置不支援選取的編碼規格";return}
@@ -610,12 +635,13 @@ class Studio:Activity(){
             outputStates[index]=value;outputSummary.text=outputStates.entries.joinToString("  "){"目的地 "+it.key+"："+it.value}
         }},file,
             {mode->runOnUiThread{if(!ending){if(backgroundActive)CameraLiveService.update(if(mode==3)"網路中斷，正在重新連線" else "相機直播中，可點選停止直播");monitorState(mode==1);status.text=when{mode==3->if(file!=null)"重新連線中 · 本機繼續錄影" else "正在重新連線";mode!=1->"錄影中";file!=null->"直播中 · 同步錄影中";else->"直播中 · 已送出影音"}}}},
-            {ok,networkError,recorded->
+            {ok,networkError,recorded,issue->
                 val saved=if(recorded && file!=null)saveMovie(file) else null
                 runOnUiThread{if(backgroundActive){CameraLiveService.finish();backgroundActive=false};backgroundLive.isEnabled=true;reduceNoise?.isEnabled=true;capture=null;profile=null;monitorState(false)
                 listOf(rotateButton,editOutputs,saveLive,inputs,sizes,rates,bits,codecs,address,streamKey,live,record).forEach{it.isEnabled=true}
                 live.text=ui("go_live");record.text=ui("record");reading.text="已停止擷取"
                 status.text=when{
+                    issue!=null && !ending->issue
                     saved!=null && !ok->"傳輸中斷，已儲存 "+saved
                     saved!=null->"已儲存 "+saved
                     file!=null || !ok->"擷取、傳輸或錄影未完成，請檢查設備與連線。"
@@ -623,7 +649,7 @@ class Studio:Activity(){
                 }
                 if(stream && networkError && !ending && visible && attempts<3){
                     attempts++;waiting=true;val delay=1000L shl attempts
-                    status.text="連線中斷，"+(delay/1000)+" 秒後重試（"+attempts+"/3）"
+                    status.text=(issue ?: "連線中斷")+" "+(delay/1000)+" 秒後重試（"+attempts+"/3）"
                     live.text="取消重新連線"
                     handlers.postDelayed({waiting=false;if(visible && capture==null)begin(true)},delay)
                 }else{attempts=0;previewSelected()}
@@ -734,6 +760,8 @@ class Studio:Activity(){
         }catch(e:Exception){bitmap.recycle();button.isEnabled=true;Toast.makeText(this,ui("photo_unavailable"),Toast.LENGTH_SHORT).show()}
     }
     private val handlersForPhotos=Handler(Looper.getMainLooper())
+    override fun onResume(){super.onResume();youtube.setResumed(true)}
+    override fun onPause(){youtube.setResumed(false);super.onPause()}
     override fun onStop(){super.onStop();visible=false;stopPreview();cancelRetry();if(!backgroundActive){ending=true;capture?.stop()}else if(backgroundPreparing)CameraLiveService.stopSession?.invoke()}
     override fun onDestroy(){remotePanel.close();if(backgroundActive)CameraLiveService.stopSession?.invoke();network.unregisterNetworkCallback(monitor);super.onDestroy()}
 }

@@ -52,7 +52,7 @@ jobs:
           apk=app/build/outputs/apk/preview/app-preview.apk
           "$tools/apksigner" verify "$apk"
           "$tools/aapt" dump badging "$apk" > "$RUNNER_TEMP/preview-badging.txt"
-          grep -F "package: name='tw.meikou.live.preview'" "$RUNNER_TEMP/preview-badging.txt"
+          grep -F "package: name='tw.meikou.live.beta'" "$RUNNER_TEMP/preview-badging.txt"
       - run: |
           sudo apt-get update -qq && sudo apt-get install -y ffmpeg
           python3 -m pip install --quiet opencv-python-headless==4.11.0.86

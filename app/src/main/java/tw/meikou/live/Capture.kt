@@ -18,7 +18,7 @@ data class Profile(val width:Int,val height:Int,val fps:Int,val bitrate:Int,val 
 
 class Capture(private val ctx:Context, private val preview:Surface?, private val profile:Profile,private val scenes:Scenes,
               private var lens:Lens?, private val inputDevice:AudioDeviceInfo?, private val initialZoom:Float, private var exposureIndex:Int, private var settings:CameraSettings, private val telemetry:(String)->Unit, private val target:URI?, additional:List<URI>, outputStatus:(Int,String)->Unit, private val file:File?, private val notify:(Int)->Unit,
-              private val finished:(Boolean,Boolean,Boolean)->Unit,
+              private val finished:(Boolean,Boolean,Boolean,String?)->Unit,
               private val projection:android.media.projection.MediaProjection?=null,private val unsupportedLens:((Lens)->Unit)?=null) {
     private var virtualDisplay:android.hardware.display.VirtualDisplay?=null
     private val projectionCallback=object:android.media.projection.MediaProjection.Callback(){override fun onStop(){stop()}}
@@ -63,6 +63,7 @@ class Capture(private val ctx:Context, private val preview:Surface?, private val
     private val timeline=CaptureTimeline { video?.setParameters(Bundle().apply{putInt(MediaCodec.PARAMETER_KEY_REQUEST_SYNC_FRAME,0)}) }
     private var published=false
     private var onlineFailure=false
+    private var connectionIssue: String? = null
     private var currentBitrate=profile.bitrate
     private var probeStart=0L
     private var writeTime=0L
@@ -82,7 +83,16 @@ class Capture(private val ctx:Context, private val preview:Surface?, private val
         try {
             camThread.start()
             if(stopping.get())return@thread
-            try { client?.connect();srt?.connect() } catch(e:java.io.IOException){onlineFailure=true;throw e}
+            try {
+                client?.connect()
+                srt?.connect()
+            } catch (e: Exception) {
+                if (!stopping.get()) {
+                    if (client != null) connectionIssue = rtmpFailureText(e)
+                    onlineFailure = e is java.io.IOException && e !is RtmpRejected && e !is javax.net.ssl.SSLException
+                }
+                throw e
+            }
             if(!stopping.get()){
                 extra.start()
                 prepare()
@@ -137,7 +147,7 @@ class Capture(private val ctx:Context, private val preview:Surface?, private val
             val ok=!bad.get() && delivered.all{it}
             val saved=muxStarted && !recordingFailed && recorded.all{it}
             if(!saved)file?.delete()
-            finished(ok,onlineFailure,saved)
+            finished(ok,onlineFailure,saved,connectionIssue)
         }
     }
     @SuppressLint("MissingPermission")
