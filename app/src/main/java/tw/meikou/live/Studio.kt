@@ -562,13 +562,16 @@ class Studio:Activity(){
         options(rates,available)
         if(available.isNotEmpty())rates.setSelection(available.indexOf(previous?.takeIf { it in available }?:30).coerceAtLeast(0))
     }
-    private fun loadLenses(){runCatching{val list=inventory(getSystemService(CAMERA_SERVICE) as CameraManager);options(lenses,list)
+    private fun loadLenses(){runCatching{val list=inventory(getSystemService(CAMERA_SERVICE) as CameraManager).filterNot { lens ->
+            !lens.front && (lens.equivalent ?: 0f) >= 50f
+        }
+        options(lenses,list)
         shortcuts.removeAllViews()
         val groups=list.withIndex().filter{!it.value.front && it.value.equivalent!=null}.groupBy{
             val mm=it.value.equivalent!!
-            when{mm<22->ui("wide");mm<50->ui("normal");else->ui("tele")}
+            if(mm<22)ui("wide") else ui("normal")
         }
-        for(name in listOf(ui("wide"),ui("normal"),ui("tele"))){
+        for(name in listOf(ui("wide"),ui("normal"))){
             val group=groups[name]?:continue
             val candidate=group.sortedByDescending{it.value.physical!=null}.first()
             shortcuts.addView(Button(this).apply{text=name;background=box("#2a2d38","#3a3e4c");setTextColor(color("#e6e8ec"));setPadding(0,0,0,0);minWidth=0
